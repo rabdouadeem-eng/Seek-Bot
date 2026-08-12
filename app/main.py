@@ -1,20 +1,29 @@
 # app/main.py
+# ============================================================
+# 🔍 Seek Bot - الخادم الرئيسي (Signal Server)
+# ============================================================
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from app.config import Config
-from app.broker import BinanceBroker, YahooBroker
-from app.strategy import detect_signal
-from app.paper_trading import PaperTrading
 import logging
 
+# استيرادات نسبية (لأن الملف داخل مجلد app)
+from .config import Config
+from .broker import BinanceBroker, YahooBroker
+from .strategy import detect_signal
+from .paper_trading import PaperTrading
+
+# إعداد التسجيل (لتظهر الرسائل في سجلات Render)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ============================================================
+# 1. تهيئة التطبيق والمكونات
+# ============================================================
 app = FastAPI(title="Seek Bot", version="1.0")
-paper = PaperTrading(Config.INITIAL_BALANCE)
 
-# اختيار المصدر
+# اختيار المصدر (Binance أو Yahoo) حسب الإعداد
 if Config.DATA_SOURCE.lower() == "yahoo":
     broker = YahooBroker()
     symbol = Config.SYMBOL_YAHOO
@@ -24,6 +33,10 @@ else:
 
 logger.info(f"📡 المصدر: {Config.DATA_SOURCE} | الرمز: {symbol}")
 
+# تهيئة التداول الورقي
+paper = PaperTrading(Config.INITIAL_BALANCE)
+
+# نموذج الطلب لـ API
 class TradeRequest(BaseModel):
     symbol: str
     side: str
@@ -31,8 +44,13 @@ class TradeRequest(BaseModel):
     sl: float
     tp: float
 
+# ============================================================
+# 2. نقاط النهاية (Endpoints)
+# ============================================================
+
 @app.get("/")
 def root():
+    """الصفحة الرئيسية - لوحة التحكم"""
     html = """
     <!DOCTYPE html>
     <html lang="ar" dir="rtl">
@@ -60,12 +78,13 @@ def root():
             th { color:#8B949E; font-size:13px; }
             .empty { color:#8B949E; text-align:center; padding:20px; }
             .footer { margin-top:30px; text-align:center; color:#8B949E; font-size:13px; border-top:1px solid #262C36; padding-top:20px; }
+            .btn { background:#262C36; color:white; border:none; padding:8px 20px; border-radius:8px; cursor:pointer; margin-bottom:16px; }
         </style>
     </head>
     <body>
     <div class="container">
         <h1>🔍 Seek Bot <small style="color:#8B949E;font-size:18px;">صندوق التداول الورقي</small></h1>
-        <button onclick="fetchData()" style="background:#262C36;color:white;border:none;padding:8px 20px;border-radius:8px;cursor:pointer;margin-bottom:16px;">🔄 تحديث</button>
+        <button class="btn" onclick="fetchData()">🔄 تحديث</button>
         
         <div class="card">
             <div class="stats" id="stats">
@@ -89,7 +108,7 @@ def root():
         
         <div class="card"><h3>📊 الصفقات المفتوحة</h3><div id="openTable"><p class="empty">لا توجد صفقات</p></div></div>
         <div class="card"><h3>📋 سجل الصفقات</h3><div id="historyTable"><p class="empty">لا توجد صفقات</p></div></div>
-        <div class="footer">⚡ Seek Bot v1.0 · بيانات من <span style="color:#FBBF24;">{Config.DATA_SOURCE.upper()}</span> · جميع الصفقات وهمية (Paper Trading)</div>
+        <div class="footer">⚡ Seek Bot v1.0 · بيانات من <span style="color:#FBBF24;">""" + Config.DATA_SOURCE.upper() + """</span> · جميع الصفقات وهمية (Paper Trading)</div>
     </div>
     <script>
         async function fetchData() {
@@ -147,34 +166,61 @@ def root():
     """
     return HTMLResponse(html)
 
+
 @app.get("/signal")
 def get_signal():
+    """نقطة نهاية لجلب الإشارة الحالية (جسم JSON)"""
     df = broker.get_candles(symbol, Config.TIMEFRAME, Config.LOOKBACK_CANDLES + 10)
+    
+    # سجل لمعرفة عدد الشموع المستلمة (يظهر في سجلات Render)
+    logger.info(f"📊 عدد الشموع المستلمة: {len(df) if df is not None else 0}")
+    
     if df is None:
         return {"type": None, "entry": 0, "sl": 0, "tp": 0, "confidence": 0}
+    
     sig = detect_signal(df, Config.LOOKBACK_CANDLES)
+    
+    # سجل لمعرفة الإشارة إن وجدت
+    if sig:
+        logger.info(f"✅ إشارة: {sig['type']} | السعر: {sig['entry']} | الثقة: {sig['confidence']}")
+    else:
+        logger.info("⏸️ لا توجد إشارة حالياً")
+    
     return sig or {"type": None, "entry": 0, "sl": 0, "tp": 0, "confidence": 0}
+
 
 @app.get("/status")
 def get_status():
+    """جلب حالة المحفظة الورقية"""
     return paper.get_summary()
+
 
 @app.get("/trades")
 def get_trades():
-    return {"open": paper.get_open_positions(), "history": paper.get_trade_history()}
+    """جلب قائمة الصفقات المفتوحة والمغلقة"""
+    return {
+        "open": paper.get_open_positions(),
+        "history": paper.get_trade_history()
+    }
+
 
 @app.post("/trade")
 def execute_trade(req: TradeRequest):
+    """تنفيذ صفقة وهمية (يدوياً عبر API)"""
     can, msg = paper.can_trade(Config.MAX_TRADES_PER_DAY, 0.05)
     if not can:
         raise HTTPException(400, msg)
+    
     if req.volume <= 0:
         risk = paper.balance * Config.RISK_PER_TRADE
         sl_dist = abs(req.entry - req.sl)
         req.volume = round(risk / sl_dist if sl_dist > 0 else 0.01, 2)
+    
     if req.volume <= 0:
-        raise HTTPException(400, "حجم غير صالح")
+        raise HTTPException(400, "حجم الصفقة غير صالح")
+    
     success, result = paper.open_trade(req.symbol, req.side, req.entry, req.sl, req.tp, req.volume)
     if not success:
         raise HTTPException(400, result)
+    
     return {"status": "success", "trade": result}
