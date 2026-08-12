@@ -1,6 +1,6 @@
 # app/main.py
 # ============================================================
-# 🔍 Seek Bot - الخادم الرئيسي (Signal Server)
+# 🔍 Seek Bot - الخادم الرئيسي (مع شارت صغير)
 # ============================================================
 
 from fastapi import FastAPI, HTTPException
@@ -8,22 +8,16 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import logging
 
-# استيرادات نسبية (لأن الملف داخل مجلد app)
 from .config import Config
 from .broker import BinanceBroker, YahooBroker
 from .strategy import detect_signal
 from .paper_trading import PaperTrading
 
-# إعداد التسجيل (لتظهر الرسائل في سجلات Render)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ============================================================
-# 1. تهيئة التطبيق والمكونات
-# ============================================================
 app = FastAPI(title="Seek Bot", version="1.0")
 
-# اختيار المصدر (Binance أو Yahoo) حسب الإعداد
 if Config.DATA_SOURCE.lower() == "yahoo":
     broker = YahooBroker()
     symbol = Config.SYMBOL_YAHOO
@@ -33,10 +27,8 @@ else:
 
 logger.info(f"📡 المصدر: {Config.DATA_SOURCE} | الرمز: {symbol}")
 
-# تهيئة التداول الورقي
 paper = PaperTrading(Config.INITIAL_BALANCE)
 
-# نموذج الطلب لـ API
 class TradeRequest(BaseModel):
     symbol: str
     side: str
@@ -45,12 +37,10 @@ class TradeRequest(BaseModel):
     tp: float
 
 # ============================================================
-# 2. نقاط النهاية (Endpoints)
+# الصفحة الرئيسية (مع شارت)
 # ============================================================
-
 @app.get("/")
 def root():
-    """الصفحة الرئيسية - لوحة التحكم"""
     html = """
     <!DOCTYPE html>
     <html lang="ar" dir="rtl">
@@ -58,6 +48,7 @@ def root():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🔍 Seek Bot</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <style>
             * { margin:0; padding:0; box-sizing:border-box; }
             body { font-family: 'Segoe UI', sans-serif; background: #0E1116; color: #E6EDF3; padding:20px; }
@@ -79,12 +70,13 @@ def root():
             .empty { color:#8B949E; text-align:center; padding:20px; }
             .footer { margin-top:30px; text-align:center; color:#8B949E; font-size:13px; border-top:1px solid #262C36; padding-top:20px; }
             .btn { background:#262C36; color:white; border:none; padding:8px 20px; border-radius:8px; cursor:pointer; margin-bottom:16px; }
+            #priceChart { max-height: 200px; width: 100%; }
         </style>
     </head>
     <body>
     <div class="container">
         <h1>🔍 Seek Bot <small style="color:#8B949E;font-size:18px;">صندوق التداول الورقي</small></h1>
-        <button class="btn" onclick="fetchData()">🔄 تحديث</button>
+        <button class="btn" onclick="refreshAll()">🔄 تحديث</button>
         
         <div class="card">
             <div class="stats" id="stats">
@@ -105,12 +97,66 @@ def root():
                 <span>الثقة: <strong id="conf" style="color:#FBBF24;">--</strong></span>
             </div>
         </div>
+
+        <!-- الشارت الصغير -->
+        <div class="card">
+            <h3>📊 حركة السعر (آخر 30 شمعة)</h3>
+            <canvas id="priceChart" height="180"></canvas>
+        </div>
         
         <div class="card"><h3>📊 الصفقات المفتوحة</h3><div id="openTable"><p class="empty">لا توجد صفقات</p></div></div>
         <div class="card"><h3>📋 سجل الصفقات</h3><div id="historyTable"><p class="empty">لا توجد صفقات</p></div></div>
         <div class="footer">⚡ Seek Bot v1.0 · بيانات من <span style="color:#FBBF24;">""" + Config.DATA_SOURCE.upper() + """</span> · جميع الصفقات وهمية (Paper Trading)</div>
     </div>
     <script>
+        let chart = null;
+
+        async function loadChart() {
+            try {
+                const res = await fetch('/candles');
+                const data = await res.json();
+                const ctx = document.getElementById('priceChart').getContext('2d');
+                
+                if (data.candles.length === 0) {
+                    if (chart) { chart.destroy(); chart = null; }
+                    return;
+                }
+
+                const labels = data.candles.map(c => c.time);
+                const prices = data.candles.map(c => c.close);
+                
+                if (chart) { chart.destroy(); }
+                
+                chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'سعر الإغلاق',
+                            data: prices,
+                            borderColor: '#FBBF24',
+                            backgroundColor: 'rgba(251, 191, 36, 0.15)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 2,
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { labels: { color: '#8B949E', boxWidth: 10 } }
+                        },
+                        scales: {
+                            x: { ticks: { color: '#8B949E', maxTicksLimit: 8, font: { size: 9 } } },
+                            y: { ticks: { color: '#8B949E', font: { size: 9 } } }
+                        }
+                    }
+                });
+            } catch(e) { console.error('خطأ في الشارت:', e); }
+        }
+
         async function fetchData() {
             try {
                 const s = await fetch('/status'); const status = await s.json();
@@ -158,8 +204,15 @@ def root():
                 } else hist.innerHTML = '<p class="empty">لا توجد صفقات</p>';
             } catch(e) { console.error(e); }
         }
+
+        function refreshAll() {
+            fetchData();
+            loadChart();
+        }
+
         fetchData();
-        setInterval(fetchData, 15000);
+        loadChart();
+        setInterval(refreshAll, 15000);
     </script>
     </body>
     </html>
@@ -167,60 +220,63 @@ def root():
     return HTMLResponse(html)
 
 
+# ============================================================
+# نقاط النهاية (API)
+# ============================================================
+
 @app.get("/signal")
 def get_signal():
-    """نقطة نهاية لجلب الإشارة الحالية (جسم JSON)"""
     df = broker.get_candles(symbol, Config.TIMEFRAME, Config.LOOKBACK_CANDLES + 10)
-    
-    # سجل لمعرفة عدد الشموع المستلمة (يظهر في سجلات Render)
     logger.info(f"📊 عدد الشموع المستلمة: {len(df) if df is not None else 0}")
-    
     if df is None:
         return {"type": None, "entry": 0, "sl": 0, "tp": 0, "confidence": 0}
-    
     sig = detect_signal(df, Config.LOOKBACK_CANDLES)
-    
-    # سجل لمعرفة الإشارة إن وجدت
     if sig:
-        logger.info(f"✅ إشارة: {sig['type']} | السعر: {sig['entry']} | الثقة: {sig['confidence']}")
+        logger.info(f"✅ إشارة: {sig['type']} | السعر: {sig['entry']}")
     else:
         logger.info("⏸️ لا توجد إشارة حالياً")
-    
     return sig or {"type": None, "entry": 0, "sl": 0, "tp": 0, "confidence": 0}
 
+@app.get("/candles")
+def get_candles():
+    """جلب آخر 30 شمعة لعرضها على الشارت"""
+    df = broker.get_candles(symbol, Config.TIMEFRAME, 30)
+    if df is None or df.empty:
+        return {"candles": []}
+    candles = []
+    for index, row in df.iterrows():
+        candles.append({
+            "time": index.strftime("%H:%M"),
+            "open": round(row["open"], 2),
+            "high": round(row["high"], 2),
+            "low": round(row["low"], 2),
+            "close": round(row["close"], 2)
+        })
+    return {"candles": candles}
 
 @app.get("/status")
 def get_status():
-    """جلب حالة المحفظة الورقية"""
     return paper.get_summary()
-
 
 @app.get("/trades")
 def get_trades():
-    """جلب قائمة الصفقات المفتوحة والمغلقة"""
     return {
         "open": paper.get_open_positions(),
         "history": paper.get_trade_history()
     }
 
-
 @app.post("/trade")
 def execute_trade(req: TradeRequest):
-    """تنفيذ صفقة وهمية (يدوياً عبر API)"""
     can, msg = paper.can_trade(Config.MAX_TRADES_PER_DAY, 0.05)
     if not can:
         raise HTTPException(400, msg)
-    
     if req.volume <= 0:
         risk = paper.balance * Config.RISK_PER_TRADE
         sl_dist = abs(req.entry - req.sl)
         req.volume = round(risk / sl_dist if sl_dist > 0 else 0.01, 2)
-    
     if req.volume <= 0:
-        raise HTTPException(400, "حجم الصفقة غير صالح")
-    
+        raise HTTPException(400, "حجم غير صالح")
     success, result = paper.open_trade(req.symbol, req.side, req.entry, req.sl, req.tp, req.volume)
     if not success:
         raise HTTPException(400, result)
-    
     return {"status": "success", "trade": result}
