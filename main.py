@@ -1,47 +1,35 @@
 # app/main.py
-# ============================================================
-# 🔍 Seek Bot - صندوق التداول المستقل (الخادم الرئيسي)
-# ============================================================
-
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from typing import Optional
-
-# استيراد المكونات الداخلية (سننشئها في الخطوات القادمة)
 from app.config import Config
-from app.broker import BinanceBroker
+from app.broker import BinanceBroker, YahooBroker
 from app.strategy import detect_signal
 from app.paper_trading import PaperTrading
+import logging
 
-# ============================================================
-# 1. تهيئة التطبيق والمكونات
-# ============================================================
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-app = FastAPI(
-    title="Seek Bot - صندوق التداول المستقل",
-    version="1.0",
-    description="بوت تداول ورقي (Paper Trading) يعتمد على استراتيجية القيعان والقمم مع بيانات حية من Binance"
-)
-
-# تهيئة المكونات
-broker = BinanceBroker()
+app = FastAPI(title="Seek Bot", version="1.0")
 paper = PaperTrading(Config.INITIAL_BALANCE)
 
-# ============================================================
-# 2. نموذج الطلب (Pydantic)
-# ============================================================
+# اختيار المصدر
+if Config.DATA_SOURCE.lower() == "yahoo":
+    broker = YahooBroker()
+    symbol = Config.SYMBOL_YAHOO
+else:
+    broker = BinanceBroker()
+    symbol = Config.SYMBOL
+
+logger.info(f"📡 المصدر: {Config.DATA_SOURCE} | الرمز: {symbol}")
 
 class TradeRequest(BaseModel):
     symbol: str
-    side: str  # "BUY" أو "SELL"
-    volume: float
+    side: str
+    volume: float = 0
     sl: float
     tp: float
-
-# ============================================================
-# 3. نقطة النهاية الرئيسية (لوحة التحكم)
-# ============================================================
 
 @app.get("/")
 def root():
@@ -51,291 +39,142 @@ def root():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>🔍 Seek Bot - صندوق التداول</title>
+        <title>🔍 Seek Bot</title>
         <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { 
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-                background: #0E1116; 
-                color: #E6EDF3; 
-                padding: 20px; 
-                min-height: 100vh;
-            }
-            .container { max-width: 1200px; margin: 0 auto; }
-            .card { 
-                background: #161B22; 
-                border: 1px solid #262C36; 
-                border-radius: 16px; 
-                padding: 20px; 
-                margin-bottom: 16px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            }
-            h1 { color: #FBBF24; font-size: 28px; }
-            h1 small { color: #8B949E; font-size: 18px; font-weight: normal; }
-            .badge { 
-                display: inline-block; 
-                padding: 4px 12px; 
-                border-radius: 20px; 
-                font-weight: bold;
-                font-size: 14px;
-            }
-            .badge-buy { background: #2EA043; color: white; }
-            .badge-sell { background: #DA3633; color: white; }
-            .badge-neutral { background: #262C36; color: #8B949E; }
-            
-            .stats-grid { 
-                display: grid; 
-                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); 
-                gap: 16px; 
-                margin-top: 8px;
-            }
-            .stat-item { 
-                background: #0E1116; 
-                padding: 12px 16px; 
-                border-radius: 12px; 
-                border: 1px solid #262C36; 
-                text-align: center;
-            }
-            .stat-label { font-size: 12px; color: #8B949E; text-transform: uppercase; letter-spacing: 0.5px; }
-            .stat-value { font-size: 22px; font-weight: 700; margin-top: 4px; }
-            .green { color: #2EA043; }
-            .red { color: #DA3633; }
-            .gold { color: #FBBF24; }
-            .blue { color: #58A6FF; }
-            
-            table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-            th, td { padding: 10px 12px; text-align: right; border-bottom: 1px solid #1C2128; }
-            th { color: #8B949E; font-weight: 600; font-size: 13px; }
-            td { font-size: 14px; }
-            .empty-message { color: #8B949E; text-align: center; padding: 20px; }
-            
-            .btn {
-                padding: 8px 18px;
-                border: none;
-                border-radius: 8px;
-                cursor: pointer;
-                font-weight: 600;
-                transition: all 0.2s ease;
-                font-size: 14px;
-                color: white;
-            }
-            .btn:hover { transform: scale(1.03); opacity: 0.9; }
-            .btn-buy { background: #2EA043; }
-            .btn-sell { background: #DA3633; }
-            .btn-refresh { background: #262C36; color: #E6EDF3; }
-            
-            .footer { margin-top: 30px; text-align: center; color: #8B949E; font-size: 13px; border-top: 1px solid #262C36; padding-top: 20px; }
-            .highlight { color: #FBBF24; }
-            
-            @media (max-width: 600px) {
-                .stats-grid { grid-template-columns: 1fr 1fr; }
-                body { padding: 12px; }
-            }
+            * { margin:0; padding:0; box-sizing:border-box; }
+            body { font-family: 'Segoe UI', sans-serif; background: #0E1116; color: #E6EDF3; padding:20px; }
+            .container { max-width:1200px; margin:0 auto; }
+            .card { background:#161B22; border:1px solid #262C36; border-radius:16px; padding:20px; margin-bottom:16px; }
+            h1 { color:#FBBF24; }
+            .stats { display:grid; grid-template-columns: repeat(auto-fit,minmax(140px,1fr)); gap:12px; }
+            .stat { background:#0E1116; padding:12px; border-radius:12px; text-align:center; border:1px solid #262C36; }
+            .stat .label { color:#8B949E; font-size:12px; }
+            .stat .value { font-size:22px; font-weight:700; }
+            .green { color:#2EA043; } .red { color:#DA3633; } .gold { color:#FBBF24; } .blue { color:#58A6FF; }
+            .badge { display:inline-block; padding:4px 14px; border-radius:20px; font-weight:bold; }
+            .badge-buy { background:#2EA043; color:white; }
+            .badge-sell { background:#DA3633; color:white; }
+            .badge-neutral { background:#262C36; color:#8B949E; }
+            table { width:100%; border-collapse:collapse; margin-top:10px; }
+            th, td { padding:8px 12px; border-bottom:1px solid #1C2128; text-align:right; }
+            th { color:#8B949E; font-size:13px; }
+            .empty { color:#8B949E; text-align:center; padding:20px; }
+            .footer { margin-top:30px; text-align:center; color:#8B949E; font-size:13px; border-top:1px solid #262C36; padding-top:20px; }
         </style>
     </head>
     <body>
-        <div class="container">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
-                <h1>🔍 Seek Bot <small>صندوق التداول الورقي</small></h1>
-                <button class="btn btn-refresh" onclick="fetchData()">🔄 تحديث</button>
-            </div>
-            
-            <!-- بطاقة الرصيد والإحصائيات -->
-            <div class="card" id="statusCard">
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                    <h3 style="color: #E6EDF3;">💰 المحفظة</h3>
-                    <span id="lastUpdate" style="color: #8B949E; font-size: 12px;">⏳ جاري التحميل...</span>
-                </div>
-                <div class="stats-grid" id="statsGrid">
-                    <div class="stat-item"><div class="stat-label">الرصيد</div><div class="stat-value gold" id="balance">--</div></div>
-                    <div class="stat-item"><div class="stat-label">إجمالي الربح</div><div class="stat-value" id="totalPnl">--</div></div>
-                    <div class="stat-item"><div class="stat-label">صفقات مفتوحة</div><div class="stat-value blue" id="openPositions">--</div></div>
-                    <div class="stat-item"><div class="stat-label">إجمالي الصفقات</div><div class="stat-value" id="totalTrades">--</div></div>
-                </div>
-            </div>
-            
-            <!-- بطاقة الإشارة -->
-            <div class="card">
-                <h3 style="color: #E6EDF3;">📈 الإشارة الحالية</h3>
-                <div id="signalDisplay" style="padding: 12px 0; font-size: 16px;">
-                    <span class="badge badge-neutral">⏳ جاري الفحص...</span>
-                </div>
-                <div style="display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; font-size: 14px; color: #8B949E;">
-                    <span>الدخول: <strong id="entryPrice" style="color: #E6EDF3;">--</strong></span>
-                    <span>وقف الخسارة: <strong id="slPrice" style="color: #DA3633;">--</strong></span>
-                    <span>جني الأرباح: <strong id="tpPrice" style="color: #2EA043;">--</strong></span>
-                    <span>الثقة: <strong id="confidenceDisplay" style="color: #FBBF24;">--</strong></span>
-                </div>
-            </div>
-            
-            <!-- الصفقات المفتوحة -->
-            <div class="card">
-                <h3 style="color: #E6EDF3;">📊 الصفقات المفتوحة</h3>
-                <div id="openTradesTable"><p class="empty-message">📭 لا توجد صفقات مفتوحة</p></div>
-            </div>
-            
-            <!-- سجل الصفقات -->
-            <div class="card">
-                <h3 style="color: #E6EDF3;">📋 سجل الصفقات</h3>
-                <div id="historyTradesTable"><p class="empty-message">📭 لا توجد صفقات</p></div>
-            </div>
-            
-            <div class="footer">
-                ⚡ Seek Bot v1.0 · بيانات من <span class="highlight">Binance</span> · جميع الصفقات وهمية (Paper Trading)
+    <div class="container">
+        <h1>🔍 Seek Bot <small style="color:#8B949E;font-size:18px;">صندوق التداول الورقي</small></h1>
+        <button onclick="fetchData()" style="background:#262C36;color:white;border:none;padding:8px 20px;border-radius:8px;cursor:pointer;margin-bottom:16px;">🔄 تحديث</button>
+        
+        <div class="card">
+            <div class="stats" id="stats">
+                <div class="stat"><div class="label">💰 الرصيد</div><div class="value gold" id="balance">--</div></div>
+                <div class="stat"><div class="label">📈 إجمالي الربح</div><div class="value" id="pnl">--</div></div>
+                <div class="stat"><div class="label">📊 صفقات مفتوحة</div><div class="value blue" id="openPos">--</div></div>
+                <div class="stat"><div class="label">📋 إجمالي الصفقات</div><div class="value" id="totalTrades">--</div></div>
             </div>
         </div>
-
-        <script>
-            const API_BASE = '';
-            
-            async function fetchData() {
-                try {
-                    // 1. جلب الحالة
-                    const statusRes = await fetch(API_BASE + '/status');
-                    const status = await statusRes.json();
-                    
-                    document.getElementById('balance').textContent = `$${status.balance.toFixed(2)}`;
-                    document.getElementById('totalPnl').textContent = `$${status.total_pnl.toFixed(2)}`;
-                    document.getElementById('totalPnl').className = `stat-value ${status.total_pnl >= 0 ? 'green' : 'red'}`;
-                    document.getElementById('openPositions').textContent = status.open_positions;
-                    document.getElementById('totalTrades').textContent = status.total_trades;
-                    document.getElementById('lastUpdate').textContent = `🕐 آخر تحديث: ${new Date().toLocaleTimeString('ar-EG')}`;
-                    
-                    // 2. جلب الإشارة
-                    const signalRes = await fetch(API_BASE + '/signal');
-                    const signal = await signalRes.json();
-                    
-                    const signalDiv = document.getElementById('signalDisplay');
-                    if (signal.type) {
-                        const badgeClass = signal.type === 'BUY' ? 'badge-buy' : 'badge-sell';
-                        signalDiv.innerHTML = `<span class="badge ${badgeClass}">${signal.type}</span>`;
-                        document.getElementById('entryPrice').textContent = signal.entry.toFixed(2);
-                        document.getElementById('slPrice').textContent = signal.sl.toFixed(2);
-                        document.getElementById('tpPrice').textContent = signal.tp.toFixed(2);
-                        document.getElementById('confidenceDisplay').textContent = (signal.confidence * 100).toFixed(0) + '%';
-                    } else {
-                        signalDiv.innerHTML = `<span class="badge badge-neutral">⏸️ لا توجد إشارة</span>`;
-                        document.getElementById('entryPrice').textContent = '--';
-                        document.getElementById('slPrice').textContent = '--';
-                        document.getElementById('tpPrice').textContent = '--';
-                        document.getElementById('confidenceDisplay').textContent = '--';
-                    }
-                    
-                    // 3. جلب الصفقات المفتوحة
-                    const tradesRes = await fetch(API_BASE + '/trades');
-                    const tradesData = await tradesRes.json();
-                    
-                    // الصفقات المفتوحة
-                    const openTable = document.getElementById('openTradesTable');
-                    if (tradesData.open.length > 0) {
-                        let html = `<table><thead><tr><th>الرمز</th><th>النوع</th><th>الدخول</th><th>SL</th><th>TP</th><th>الحجم</th></tr></thead><tbody>`;
-                        tradesData.open.forEach(t => {
-                            html += `<tr>
-                                <td><strong>${t.symbol}</strong></td>
-                                <td><span class="badge ${t.side === 'BUY' ? 'badge-buy' : 'badge-sell'}">${t.side}</span></td>
-                                <td>${t.entry.toFixed(2)}</td>
-                                <td style="color:#DA3633;">${t.sl.toFixed(2)}</td>
-                                <td style="color:#2EA043;">${t.tp.toFixed(2)}</td>
-                                <td>${t.volume.toFixed(2)}</td>
-                            </tr>`;
-                        });
-                        html += `</tbody></table>`;
-                        openTable.innerHTML = html;
-                    } else {
-                        openTable.innerHTML = `<p class="empty-message">📭 لا توجد صفقات مفتوحة</p>`;
-                    }
-                    
-                    // سجل الصفقات (آخر 5)
-                    const historyTable = document.getElementById('historyTradesTable');
-                    if (tradesData.history.length > 0) {
-                        let html = `<table><thead><tr><th>الرمز</th><th>النوع</th><th>الدخول</th><th>الخروج</th><th>الربح</th></tr></thead><tbody>`;
-                        const last5 = tradesData.history.slice(-5).reverse();
-                        last5.forEach(t => {
-                            const profitClass = t.profit >= 0 ? 'green' : 'red';
-                            html += `<tr>
-                                <td><strong>${t.symbol}</strong></td>
-                                <td><span class="badge ${t.side === 'BUY' ? 'badge-buy' : 'badge-sell'}">${t.side}</span></td>
-                                <td>${t.entry.toFixed(2)}</td>
-                                <td>${t.exit ? t.exit.toFixed(2) : '--'}</td>
-                                <td class="${profitClass}">$${t.profit.toFixed(2)}</td>
-                            </tr>`;
-                        });
-                        html += `</tbody></table>`;
-                        historyTable.innerHTML = html;
-                    } else {
-                        historyTable.innerHTML = `<p class="empty-message">📭 لا توجد صفقات</p>`;
-                    }
-                    
-                } catch(e) {
-                    console.error('خطأ في جلب البيانات:', e);
-                    document.getElementById('balance').textContent = '⚠️ خطأ';
+        
+        <div class="card">
+            <h3>📈 الإشارة الحالية</h3>
+            <div id="signal"><span class="badge badge-neutral">⏳ جاري الفحص...</span></div>
+            <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:14px;color:#8B949E;">
+                <span>الدخول: <strong id="entry" style="color:#E6EDF3;">--</strong></span>
+                <span>SL: <strong id="sl" style="color:#DA3633;">--</strong></span>
+                <span>TP: <strong id="tp" style="color:#2EA043;">--</strong></span>
+                <span>الثقة: <strong id="conf" style="color:#FBBF24;">--</strong></span>
+            </div>
+        </div>
+        
+        <div class="card"><h3>📊 الصفقات المفتوحة</h3><div id="openTable"><p class="empty">لا توجد صفقات</p></div></div>
+        <div class="card"><h3>📋 سجل الصفقات</h3><div id="historyTable"><p class="empty">لا توجد صفقات</p></div></div>
+        <div class="footer">⚡ Seek Bot v1.0 · بيانات من <span style="color:#FBBF24;">{Config.DATA_SOURCE.upper()}</span> · جميع الصفقات وهمية (Paper Trading)</div>
+    </div>
+    <script>
+        async function fetchData() {
+            try {
+                const s = await fetch('/status'); const status = await s.json();
+                document.getElementById('balance').textContent = '$'+status.balance.toFixed(2);
+                const pnl = document.getElementById('pnl');
+                pnl.textContent = '$'+status.total_pnl.toFixed(2);
+                pnl.className = 'value '+(status.total_pnl>=0?'green':'red');
+                document.getElementById('openPos').textContent = status.open_positions;
+                document.getElementById('totalTrades').textContent = status.total_trades;
+                
+                const sig = await fetch('/signal'); const signal = await sig.json();
+                const sigDiv = document.getElementById('signal');
+                if(signal.type) {
+                    sigDiv.innerHTML = `<span class="badge badge-${signal.type.toLowerCase()}">${signal.type}</span>`;
+                    document.getElementById('entry').textContent = signal.entry.toFixed(2);
+                    document.getElementById('sl').textContent = signal.sl.toFixed(2);
+                    document.getElementById('tp').textContent = signal.tp.toFixed(2);
+                    document.getElementById('conf').textContent = (signal.confidence*100).toFixed(0)+'%';
+                } else {
+                    sigDiv.innerHTML = `<span class="badge badge-neutral">⏸️ لا توجد إشارة</span>`;
+                    ['entry','sl','tp','conf'].forEach(id => document.getElementById(id).textContent='--');
                 }
-            }
-            
-            // تحديث تلقائي كل 15 ثانية
-            fetchData();
-            setInterval(fetchData, 15000);
-        </script>
+                
+                const t = await fetch('/trades'); const trades = await t.json();
+                const openTable = document.getElementById('openTable');
+                if(trades.open.length) {
+                    let html = `<table><tr><th>الرمز</th><th>النوع</th><th>الدخول</th><th>SL</th><th>TP</th><th>الحجم</th></tr>`;
+                    trades.open.forEach(t => {
+                        html += `<tr><td><b>${t.symbol}</b></td><td><span class="badge badge-${t.side.toLowerCase()}">${t.side}</span></td>
+                                <td>${t.entry}</td><td style="color:#DA3633;">${t.sl}</td><td style="color:#2EA043;">${t.tp}</td><td>${t.volume}</td></tr>`;
+                    });
+                    html += `</table>`;
+                    openTable.innerHTML = html;
+                } else openTable.innerHTML = '<p class="empty">لا توجد صفقات مفتوحة</p>';
+                
+                const hist = document.getElementById('historyTable');
+                if(trades.history.length) {
+                    let html = `<table><tr><th>الرمز</th><th>النوع</th><th>الدخول</th><th>الخروج</th><th>الربح</th></tr>`;
+                    trades.history.slice(-5).reverse().forEach(t => {
+                        html += `<tr><td><b>${t.symbol}</b></td><td><span class="badge badge-${t.side.toLowerCase()}">${t.side}</span></td>
+                                <td>${t.entry}</td><td>${t.exit||'--'}</td><td class="${t.profit>=0?'green':'red'}">$${t.profit.toFixed(2)}</td></tr>`;
+                    });
+                    html += `</table>`;
+                    hist.innerHTML = html;
+                } else hist.innerHTML = '<p class="empty">لا توجد صفقات</p>';
+            } catch(e) { console.error(e); }
+        }
+        fetchData();
+        setInterval(fetchData, 15000);
+    </script>
     </body>
     </html>
     """
     return HTMLResponse(html)
 
-# ============================================================
-# 4. نقاط النهاية API (الإشارة، الحالة، الصفقات، التداول)
-# ============================================================
-
 @app.get("/signal")
 def get_signal():
-    """جلب آخر إشارة من الاستراتيجية"""
-    df = broker.get_candles(Config.SYMBOL, Config.TIMEFRAME, Config.LOOKBACK_CANDLES + 10)
-    if df is None or df.empty:
+    df = broker.get_candles(symbol, Config.TIMEFRAME, Config.LOOKBACK_CANDLES + 10)
+    if df is None:
         return {"type": None, "entry": 0, "sl": 0, "tp": 0, "confidence": 0}
-    signal = detect_signal(df, Config.LOOKBACK_CANDLES)
-    if signal is None:
-        return {"type": None, "entry": 0, "sl": 0, "tp": 0, "confidence": 0}
-    return signal
+    sig = detect_signal(df, Config.LOOKBACK_CANDLES)
+    return sig or {"type": None, "entry": 0, "sl": 0, "tp": 0, "confidence": 0}
 
 @app.get("/status")
 def get_status():
-    """جلب حالة المحفظة الورقية"""
     return paper.get_summary()
 
 @app.get("/trades")
 def get_trades():
-    """جلب الصفقات المفتوحة والمغلقة"""
-    open_positions = paper.get_open_positions()
-    history = paper.get_trade_history()
-    return {"open": open_positions, "history": history}
+    return {"open": paper.get_open_positions(), "history": paper.get_trade_history()}
 
 @app.post("/trade")
 def execute_trade(req: TradeRequest):
-    """تنفيذ صفقة وهمية (يدوياً عبر API)"""
-    # التحقق من إمكانية التداول
     can, msg = paper.can_trade(Config.MAX_TRADES_PER_DAY, 0.05)
     if not can:
         raise HTTPException(400, msg)
-    
-    # حساب حجم اللوت (إذا لم يتم تحديده)
     if req.volume <= 0:
-        balance = paper.balance
-        risk_amount = balance * Config.RISK_PER_TRADE
-        sl_distance = abs(req.entry - req.sl)
-        volume = risk_amount / sl_distance if sl_distance > 0 else 0.01
-        req.volume = round(volume, 2)
-    
+        risk = paper.balance * Config.RISK_PER_TRADE
+        sl_dist = abs(req.entry - req.sl)
+        req.volume = round(risk / sl_dist if sl_dist > 0 else 0.01, 2)
     if req.volume <= 0:
-        raise HTTPException(400, "حجم الصفقة غير صالح")
-    
+        raise HTTPException(400, "حجم غير صالح")
     success, result = paper.open_trade(req.symbol, req.side, req.entry, req.sl, req.tp, req.volume)
     if not success:
         raise HTTPException(400, result)
     return {"status": "success", "trade": result}
-
-# ============================================================
-# 5. تشغيل البوت (للتجربة المحلية)
-# ============================================================
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
