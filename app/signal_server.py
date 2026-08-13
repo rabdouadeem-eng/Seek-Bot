@@ -1,6 +1,6 @@
 # app/signal_server.py
 # ============================================================
-# 🔍 Seek Bot - خادم الإشارات الموحد (نسخة واضحة)
+# 🔍 Seek Bot - خادم الإشارات النهائي (Binance فقط)
 # ============================================================
 
 import asyncio
@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from .config import Config
-from .broker import BinanceBroker, YahooBroker
+from .broker import BinanceBroker
 from .strategy import detect_signal
 
 logger = logging.getLogger(__name__)
@@ -17,34 +17,15 @@ logger = logging.getLogger(__name__)
 class DataSourceManager:
     def __init__(self):
         self.binance = BinanceBroker()
-        self.yahoo = YahooBroker()
         self.cache = {}
     
-    def get_broker(self, symbol: str):
-        # ✅ قاعدة واضحة لاختيار المصدر
-        if symbol.endswith("USDT") or (symbol.endswith("USD") and "=" not in symbol):
-            return self.binance
-        else:
-            return self.yahoo
-    
-    def get_candles(self, symbol: str, timeframe: str = "1h", limit: int = 30):
-        broker = self.get_broker(symbol)
+    def get_candles(self, symbol: str, timeframe: str = "15m", limit: int = 30):
         try:
-            df = broker.get_candles(symbol, timeframe, limit)
+            df = self.binance.get_candles(symbol, timeframe, limit)
             if df is not None and not df.empty:
                 return df
         except Exception as e:
-            logger.warning(f"فشل جلب {symbol} من المصدر الأساسي: {e}")
-        
-        # محاولة المصدر البديل (اختياري)
-        fallback_broker = self.yahoo if isinstance(broker, BinanceBroker) else self.binance
-        try:
-            df = fallback_broker.get_candles(symbol, timeframe, limit)
-            if df is not None and not df.empty:
-                return df
-        except Exception as e:
-            logger.error(f"فشل جلب {symbol} من المصدر البديل: {e}")
-        
+            logger.error(f"فشل جلب {symbol} من Binance: {e}")
         return None
 
 
@@ -92,9 +73,8 @@ class SignalEngine:
     def get_all_signals(self, symbols: List[str] = None) -> Dict[str, dict]:
         if symbols is None:
             symbols = [
-                "EURUSD=X", "GBPUSD=X", "XAUUSD=X",   # Yahoo
-                "BTCUSDT", "ETHUSDT", "BNBUSDT",      # Binance
-                "SOLUSDT", "XRPUSDT"                  # Binance
+                "BTCUSDT", "ETHUSDT", "BNBUSDT",
+                "SOLUSDT", "XRPUSDT", "ADAUSDT"
             ]
         
         results = {}
@@ -139,11 +119,7 @@ def get_all_signals_response():
 async def auto_update_signals(interval: int = 60):
     while True:
         try:
-            symbols = [
-                "EURUSD=X", "GBPUSD=X", "XAUUSD=X",
-                "BTCUSDT", "ETHUSDT", "BNBUSDT",
-                "SOLUSDT", "XRPUSDT"
-            ]
+            symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT"]
             signal_engine.get_all_signals(symbols)
             logger.info(f"🔄 تم تحديث الإشارات تلقائياً: {len(symbols)} رمز")
         except Exception as e:
@@ -156,4 +132,4 @@ def start_auto_updater():
         asyncio.run(auto_update_signals(60))
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
-    logger.info("🚀 تم تشغيل المحدّث التلقائي للإشارات (متعدد المصادر)")
+    logger.info("🚀 تم تشغيل المحدّث التلقائي للإشارات (Binance)")
