@@ -1,6 +1,6 @@
 # app/signal_server.py
 # ============================================================
-# 🔍 Seek Bot - خادم الإشارات (Binance فقط) - نسخة محسنة
+# 🔍 Seek Bot - خادم الإشارات (DataBroker)
 # ============================================================
 
 import asyncio
@@ -9,29 +9,25 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from .config import Config
-from .broker import BinanceBroker
+from .broker import DataBroker  # ✅ استخدم DataBroker بدلاً من BinanceBroker
 from .strategy import detect_signal
 
 logger = logging.getLogger(__name__)
 
 class DataSourceManager:
     def __init__(self):
-        self.binance = BinanceBroker()
-        self.cache = {}
+        self.broker = DataBroker()  # ✅ استخدم DataBroker
     
     def get_candles(self, symbol: str, timeframe: str = None, limit: int = 100):
-        """جلب البيانات مع حد أدنى 100 شمعة لضمان كفاية البيانات"""
         if timeframe is None:
             timeframe = Config.TIMEFRAME
         try:
-            df = self.binance.get_candles(symbol, timeframe, limit)
+            df = self.broker.get_candles(symbol, timeframe, limit)
             if df is not None and not df.empty:
                 logger.info(f"✅ تم جلب {len(df)} شمعة لـ {symbol}")
                 return df
-            else:
-                logger.warning(f"⚠️ بيانات فارغة لـ {symbol}")
         except Exception as e:
-            logger.error(f"❌ فشل جلب {symbol} من Binance: {e}")
+            logger.error(f"❌ فشل جلب {symbol}: {e}")
         return None
 
 
@@ -44,7 +40,6 @@ class SignalEngine:
         if lookback is None:
             lookback = Config.LOOKBACK_CANDLES
         
-        # جلب عدد كافٍ من الشموع (lookback + 20 للاحتياط)
         df = self.data_manager.get_candles(symbol, Config.TIMEFRAME, lookback + 20)
         
         if df is None or df.empty:
@@ -59,7 +54,6 @@ class SignalEngine:
                 "timestamp": datetime.now().isoformat()
             }
         
-        # التأكد من أن عدد الشموع كافٍ
         if len(df) < lookback + 5:
             return {
                 "symbol": symbol,
@@ -88,16 +82,13 @@ class SignalEngine:
                 "sl": 0,
                 "tp": 0,
                 "confidence": 0.0,
-                "reason": "لا توجد إشارة واضحة (الشروط غير متحققة)",
+                "reason": "لا توجد إشارة واضحة",
                 "timestamp": datetime.now().isoformat()
             }
     
     def get_all_signals(self, symbols: List[str] = None) -> Dict[str, dict]:
         if symbols is None:
-            symbols = [
-                "BTCUSDT", "ETHUSDT", "BNBUSDT",
-                "SOLUSDT", "XRPUSDT", "ADAUSDT"
-            ]
+            symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT"]
         
         results = {}
         for sym in symbols:
@@ -154,4 +145,4 @@ def start_auto_updater():
         asyncio.run(auto_update_signals(60))
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
-    logger.info("🚀 تم تشغيل المحدّث التلقائي للإشارات (Binance)")
+    logger.info("🚀 تم تشغيل المحدّث التلقائي للإشارات (DataBroker)")
