@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import logging
 from .config import Config
-from .broker import YahooBroker, BinanceBroker
+from .broker import DataBroker  # ✅ استيراد DataBroker بدلاً من YahooBroker و BinanceBroker
 from .strategy import detect_signal
 from .paper_trading import PaperTrading
 
@@ -24,15 +24,11 @@ app = FastAPI(title="Seek Bot - Signal Server", version="2.0")
 # 1. تهيئة المصادر
 # ============================================================
 
-# اختيار المصدر حسب الإعداد
-if Config.DATA_SOURCE.lower() == "binance":
-    broker = BinanceBroker()
-    symbol = Config.SYMBOL
-else:
-    broker = YahooBroker()
-    symbol = Config.SYMBOL_YAHOO
+# ✅ استخدام DataBroker (يجمع بين Binance و CoinCap)
+broker = DataBroker()
+symbol = Config.SYMBOL  # استخدام الرمز من الإعدادات (BTCUSDT)
 
-logger.info(f"📡 المصدر: {Config.DATA_SOURCE} | الرمز: {symbol}")
+logger.info(f"📡 المصدر: DataBroker (Binance → CoinCap) | الرمز: {symbol}")
 
 # تهيئة التداول الورقي
 paper = PaperTrading(Config.INITIAL_BALANCE)
@@ -63,20 +59,20 @@ def root():
     <head><title>🔍 Seek Bot</title></head>
     <body style="font-family: sans-serif; background: #0E1116; color: #E6EDF3; padding: 20px;">
         <h1>🔍 Seek Bot - خادم الإشارات</h1>
-        <p>✅ البوت يعمل على <strong>{}</strong></p>
+        <p>✅ البوت يعمل على <strong>DataBroker</strong></p>
         <hr>
         <h3>📊 نقاط النهاية المتاحة:</h3>
         <ul>
             <li><a href="/signal" style="color: #FBBF24;">/signal</a> - الإشارة الحالية</li>
-            <li><a href="/signals/all" style="color: #FBBF24;">/signals/all</a> - جميع الإشارات (فوركس + ذهب + عملات)</li>
-            <li><a href="/signal/EURUSD=X" style="color: #FBBF24;">/signal/EURUSD=X</a> - إشارة لرمز معين</li>
+            <li><a href="/signals/all" style="color: #FBBF24;">/signals/all</a> - جميع الإشارات</li>
+            <li><a href="/signal/BTCUSDT" style="color: #FBBF24;">/signal/BTCUSDT</a> - إشارة لرمز معين</li>
             <li><a href="/candles" style="color: #FBBF24;">/candles</a> - بيانات الشموع</li>
             <li><a href="/status" style="color: #FBBF24;">/status</a> - حالة المحفظة</li>
         </ul>
         <p style="color: #8B949E; margin-top: 20px;">⚡ جميع الصفقات وهمية (Paper Trading)</p>
     </body>
     </html>
-    """.format(Config.DATA_SOURCE.upper())
+    """
     return HTMLResponse(html)
 
 # ============================================================
@@ -95,7 +91,7 @@ def get_signal():
 
 @app.get("/signal/{symbol}")
 def get_signal_by_symbol(symbol: str):
-    """إشارة لرمز معين (مثل /signal/EURUSD=X)"""
+    """إشارة لرمز معين (مثل /signal/BTCUSDT)"""
     return signal_engine.get_signal(symbol)
 
 @app.get("/signals/all")
