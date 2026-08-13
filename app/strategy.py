@@ -1,4 +1,4 @@
-# app/strategy.py (معدل – شروط أقل صرامة)
+# app/strategy.py - نسخة خفيفة جداً (تظهر إشارات فوراً)
 import pandas as pd
 import numpy as np
 
@@ -30,34 +30,33 @@ def is_bullish(row):
 def is_bearish(row):
     return row['close'] < row['open']
 
-def detect_signal(df, lookback=10):  # ← خفضناها من 20 إلى 10
+def detect_signal(df, lookback=3):  # ← خفضنا إلى 3 شموع فقط!
     if df is None or len(df) < lookback + 5:
         return None
-    
     last = df.iloc[-1]
     price = last['close']
-    
     recent_low = df['low'].tail(lookback).min()
     recent_high = df['high'].tail(lookback).max()
-    
     rsi = calculate_rsi(df)
     macd, macd_signal = calculate_macd(df)
     bb_lower, _, bb_upper = calculate_bollinger(df)
     
-    # شروط الشراء (مخففة)
-    buy = (price <= recent_low * 1.005 and is_bullish(last) and
-           (rsi < 40 or macd > macd_signal or price <= bb_lower))  # ← RSI < 40 بدلاً من 30
+    # شروط شراء (أوسع ما يمكن)
+    buy = (price <= recent_low * 1.02 and 
+           (is_bullish(last) or abs(last['close'] - last['open']) < 0.1) and
+           (rsi < 55 or macd > macd_signal or price <= bb_lower * 1.05))
     
-    # شروط البيع (مخففة)
-    sell = (price >= recent_high * 0.995 and is_bearish(last) and
-            (rsi > 60 or macd < macd_signal or price >= bb_upper))  # ← RSI > 60 بدلاً من 70
+    # شروط بيع (أوسع ما يمكن)
+    sell = (price >= recent_high * 0.98 and 
+            (is_bearish(last) or abs(last['close'] - last['open']) < 0.1) and
+            (rsi > 45 or macd < macd_signal or price >= bb_upper * 0.95))
     
-    confidence = 0.4  # ← خفضنا الثقة الأساسية
     if buy:
+        confidence = 0.3
         if rsi < 40: confidence += 0.3
-        elif rsi < 50: confidence += 0.15
-        if macd > macd_signal: confidence += 0.1
-        if price <= bb_lower: confidence += 0.1
+        if macd > macd_signal: confidence += 0.2
+        if price <= bb_lower: confidence += 0.2
+        if is_bullish(last): confidence += 0.1
         return {
             "type": "BUY",
             "entry": round(price, 2),
@@ -66,10 +65,11 @@ def detect_signal(df, lookback=10):  # ← خفضناها من 20 إلى 10
             "confidence": round(min(confidence, 1.0), 2)
         }
     elif sell:
+        confidence = 0.3
         if rsi > 60: confidence += 0.3
-        elif rsi > 50: confidence += 0.15
-        if macd < macd_signal: confidence += 0.1
-        if price >= bb_upper: confidence += 0.1
+        if macd < macd_signal: confidence += 0.2
+        if price >= bb_upper: confidence += 0.2
+        if is_bearish(last): confidence += 0.1
         return {
             "type": "SELL",
             "entry": round(price, 2),
