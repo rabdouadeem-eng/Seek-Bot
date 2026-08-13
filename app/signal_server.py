@@ -1,6 +1,6 @@
 # app/signal_server.py
 # ============================================================
-# 🔍 Seek Bot - خادم الإشارات (Signal Server)
+# 🔍 Seek Bot - خادم الإشارات الموحد (متعدد المصادر)
 # ============================================================
 
 import asyncio
@@ -14,19 +14,15 @@ from .strategy import detect_signal
 
 logger = logging.getLogger(__name__)
 
-# ============================================================
-# 1. مصادر البيانات المدعومة
-# ============================================================
 class DataSourceManager:
-    """مدير مصادر البيانات - يدعم Binance و Yahoo"""
-    
     def __init__(self):
         self.binance = BinanceBroker()
         self.yahoo = YahooBroker()
         self.cache = {}
     
     def get_broker(self, symbol: str):
-        if "USDT" in symbol or ("USD" in symbol and not "=" in symbol):
+        # يختار المصدر تلقائياً حسب الرمز
+        if "USDT" in symbol or (symbol.endswith("USD") and not "=" in symbol):
             return self.binance
         return self.yahoo
     
@@ -50,12 +46,7 @@ class DataSourceManager:
         return None
 
 
-# ============================================================
-# 2. محرك الإشارات
-# ============================================================
 class SignalEngine:
-    """محرك توليد الإشارات لعدة أزواج"""
-    
     def __init__(self):
         self.data_manager = DataSourceManager()
         self.last_signals = {}
@@ -97,10 +88,12 @@ class SignalEngine:
             }
     
     def get_all_signals(self, symbols: List[str] = None) -> Dict[str, dict]:
+        # ✅ قائمة موحدة تضم الفوركس، الذهب، والعملات الرقمية
         if symbols is None:
             symbols = [
-                "EURUSD=X", "GBPUSD=X", "XAUUSD=X",
-                "BTCUSDT", "ETHUSDT", "BNBUSDT"
+                "EURUSD=X", "GBPUSD=X", "XAUUSD=X",   # Yahoo
+                "BTCUSDT", "ETHUSDT", "BNBUSDT",      # Binance
+                "SOLUSDT", "XRPUSDT"                  # Binance إضافية
             ]
         
         results = {}
@@ -114,34 +107,25 @@ class SignalEngine:
             reasons = []
             last = df.iloc[-1]
             recent_low = df['low'].tail(Config.LOOKBACK_CANDLES).min()
-            
             if last['close'] <= recent_low * 1.005:
                 reasons.append("السعر قريب من القاع")
             if sig.get("confidence", 0) > 0.7:
                 reasons.append("ثقة عالية")
-            if reasons:
-                return " + ".join(reasons)
-            return "إشارة شراء"
+            return " + ".join(reasons) if reasons else "إشارة شراء"
         
         elif sig["type"] == "SELL":
             reasons = []
             last = df.iloc[-1]
             recent_high = df['high'].tail(Config.LOOKBACK_CANDLES).max()
-            
             if last['close'] >= recent_high * 0.995:
                 reasons.append("السعر قريب من القمة")
             if sig.get("confidence", 0) > 0.7:
                 reasons.append("ثقة عالية")
-            if reasons:
-                return " + ".join(reasons)
-            return "إشارة بيع"
+            return " + ".join(reasons) if reasons else "إشارة بيع"
         
         return "لا توجد إشارة"
 
 
-# ============================================================
-# 3. واجهة FastAPI (تُستدعى من main.py)
-# ============================================================
 signal_engine = SignalEngine()
 
 def get_signal_response(symbol: str):
@@ -151,13 +135,14 @@ def get_all_signals_response():
     return signal_engine.get_all_signals()
 
 
-# ============================================================
-# 4. حلقة تحديث تلقائي
-# ============================================================
 async def auto_update_signals(interval: int = 60):
     while True:
         try:
-            symbols = ["EURUSD=X", "GBPUSD=X", "XAUUSD=X", "BTCUSDT", "ETHUSDT"]
+            symbols = [
+                "EURUSD=X", "GBPUSD=X", "XAUUSD=X",
+                "BTCUSDT", "ETHUSDT", "BNBUSDT",
+                "SOLUSDT", "XRPUSDT"
+            ]
             signal_engine.get_all_signals(symbols)
             logger.info(f"🔄 تم تحديث الإشارات تلقائياً: {len(symbols)} رمز")
         except Exception as e:
@@ -170,4 +155,4 @@ def start_auto_updater():
         asyncio.run(auto_update_signals(60))
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
-    logger.info("🚀 تم تشغيل المحدّث التلقائي للإشارات")
+    logger.info("🚀 تم تشغيل المحدّث التلقائي للإشارات (متعدد المصادر)")
