@@ -1,168 +1,173 @@
-# app/main.py
+# app/signal_server.py
 # ============================================================
-# 🔍 Seek Bot - الخادم الرئيسي مع خادم إشارات متكامل
+# 🔍 Seek Bot - خادم الإشارات (Signal Server)
 # ============================================================
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+import asyncio
 import logging
+from datetime import datetime
+from typing import Dict, List, Optional
+
 from .config import Config
-from .broker import YahooBroker, BinanceBroker
+from .broker import BinanceBroker, YahooBroker
 from .strategy import detect_signal
-from .paper_trading import PaperTrading
 
-# استيراد خادم الإشارات
-from .signal_server import SignalEngine, start_auto_updater
-
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Seek Bot - Signal Server", version="2.0")
+# ============================================================
+# 1. مصادر البيانات المدعومة
+# ============================================================
+class DataSourceManager:
+    """مدير مصادر البيانات - يدعم Binance و Yahoo"""
+    
+    def __init__(self):
+        self.binance = BinanceBroker()
+        self.yahoo = YahooBroker()
+        self.cache = {}
+    
+    def get_broker(self, symbol: str):
+        if "USDT" in symbol or ("USD" in symbol and not "=" in symbol):
+            return self.binance
+        return self.yahoo
+    
+    def get_candles(self, symbol: str, timeframe: str = "1h", limit: int = 30):
+        broker = self.get_broker(symbol)
+        try:
+            df = broker.get_candles(symbol, timeframe, limit)
+            if df is not None and not df.empty:
+                return df
+        except Exception as e:
+            logger.warning(f"فشل جلب {symbol} من المصدر الأساسي: {e}")
+        
+        fallback_broker = self.yahoo if isinstance(broker, BinanceBroker) else self.binance
+        try:
+            df = fallback_broker.get_candles(symbol, timeframe, limit)
+            if df is not None and not df.empty:
+                return df
+        except Exception as e:
+            logger.error(f"فشل جلب {symbol} من المصدر البديل: {e}")
+        
+        return None
+
 
 # ============================================================
-# 1. تهيئة المصادر
+# 2. محرك الإشارات
 # ============================================================
+class SignalEngine:
+    """محرك توليد الإشارات لعدة أزواج"""
+    
+    def __init__(self):
+        self.data_manager = DataSourceManager()
+        self.last_signals = {}
+    
+    def get_signal(self, symbol: str, lookback: int = None) -> dict:
+        if lookback is None:
+            lookback = Config.LOOKBACK_CANDLES
+        
+        df = self.data_manager.get_candles(symbol, Config.TIMEFRAME, lookback + 10)
+        if df is None or df.empty:
+            return {
+                "symbol": symbol,
+                "type": "HOLD",
+                "entry": 0,
+                "sl": 0,
+                "tp": 0,
+                "confidence": 0.0,
+                "reason": "بيانات غير كافية",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        sig = detect_signal(df, lookback)
+        if sig:
+            sig["symbol"] = symbol
+            sig["timestamp"] = datetime.now().isoformat()
+            sig["reason"] = self._generate_reason(sig, df)
+            self.last_signals[symbol] = sig
+            return sig
+        else:
+            return {
+                "symbol": symbol,
+                "type": "HOLD",
+                "entry": 0,
+                "sl": 0,
+                "tp": 0,
+                "confidence": 0.0,
+                "reason": "لا توجد إشارة واضحة",
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    def get_all_signals(self, symbols: List[str] = None) -> Dict[str, dict]:
+        if symbols is None:
+            symbols = [
+                "EURUSD=X", "GBPUSD=X", "XAUUSD=X",
+                "BTCUSDT", "ETHUSDT", "BNBUSDT"
+            ]
+        
+        results = {}
+        for sym in symbols:
+            results[sym] = self.get_signal(sym)
+        
+        return results
+    
+    def _generate_reason(self, sig: dict, df) -> str:
+        if sig["type"] == "BUY":
+            reasons = []
+            last = df.iloc[-1]
+            recent_low = df['low'].tail(Config.LOOKBACK_CANDLES).min()
+            
+            if last['close'] <= recent_low * 1.005:
+                reasons.append("السعر قريب من القاع")
+            if sig.get("confidence", 0) > 0.7:
+                reasons.append("ثقة عالية")
+            if reasons:
+                return " + ".join(reasons)
+            return "إشارة شراء"
+        
+        elif sig["type"] == "SELL":
+            reasons = []
+            last = df.iloc[-1]
+            recent_high = df['high'].tail(Config.LOOKBACK_CANDLES).max()
+            
+            if last['close'] >= recent_high * 0.995:
+                reasons.append("السعر قريب من القمة")
+            if sig.get("confidence", 0) > 0.7:
+                reasons.append("ثقة عالية")
+            if reasons:
+                return " + ".join(reasons)
+            return "إشارة بيع"
+        
+        return "لا توجد إشارة"
 
-# اختيار المصدر حسب الإعداد
-if Config.DATA_SOURCE.lower() == "binance":
-    broker = BinanceBroker()
-    symbol = Config.SYMBOL
-else:
-    broker = YahooBroker()
-    symbol = Config.SYMBOL_YAHOO
 
-logger.info(f"📡 المصدر: {Config.DATA_SOURCE} | الرمز: {symbol}")
-
-# تهيئة التداول الورقي
-paper = PaperTrading(Config.INITIAL_BALANCE)
-
-# تهيئة محرك الإشارات (للمعالجة المتعددة)
+# ============================================================
+# 3. واجهة FastAPI (تُستدعى من main.py)
+# ============================================================
 signal_engine = SignalEngine()
 
-# ============================================================
-# 2. نماذج البيانات
-# ============================================================
-
-class TradeRequest(BaseModel):
-    symbol: str
-    side: str
-    volume: float = 0
-    sl: float
-    tp: float
-
-# ============================================================
-# 3. نقاط النهاية - الواجهة الرئيسية
-# ============================================================
-
-@app.get("/")
-def root():
-    html = """
-    <!DOCTYPE html>
-    <html>
-    <head><title>🔍 Seek Bot</title></head>
-    <body style="font-family: sans-serif; background: #0E1116; color: #E6EDF3; padding: 20px;">
-        <h1>🔍 Seek Bot - خادم الإشارات</h1>
-        <p>✅ البوت يعمل على <strong>{}</strong></p>
-        <hr>
-        <h3>📊 نقاط النهاية المتاحة:</h3>
-        <ul>
-            <li><a href="/signal" style="color: #FBBF24;">/signal</a> - الإشارة الحالية</li>
-            <li><a href="/signals/all" style="color: #FBBF24;">/signals/all</a> - جميع الإشارات (فوركس + ذهب + عملات)</li>
-            <li><a href="/signal/EURUSD=X" style="color: #FBBF24;">/signal/EURUSD=X</a> - إشارة لرمز معين</li>
-            <li><a href="/candles" style="color: #FBBF24;">/candles</a> - بيانات الشموع</li>
-            <li><a href="/status" style="color: #FBBF24;">/status</a> - حالة المحفظة</li>
-        </ul>
-        <p style="color: #8B949E; margin-top: 20px;">⚡ جميع الصفقات وهمية (Paper Trading)</p>
-    </body>
-    </html>
-    """.format(Config.DATA_SOURCE.upper())
-    return HTMLResponse(html)
-
-# ============================================================
-# 4. نقاط النهاية - الإشارات (الأساسية)
-# ============================================================
-
-@app.get("/signal")
-def get_signal():
-    """إشارة للرمز الافتراضي"""
-    df = broker.get_candles(symbol, Config.TIMEFRAME, Config.LOOKBACK_CANDLES + 10)
-    logger.info(f"📊 عدد الشموع: {len(df) if df is not None else 0}")
-    if df is None:
-        return {"type": None, "entry": 0, "sl": 0, "tp": 0, "confidence": 0}
-    sig = detect_signal(df, Config.LOOKBACK_CANDLES)
-    return sig or {"type": None, "entry": 0, "sl": 0, "tp": 0, "confidence": 0}
-
-@app.get("/signal/{symbol}")
-def get_signal_by_symbol(symbol: str):
-    """إشارة لرمز معين (مثل /signal/EURUSD=X)"""
+def get_signal_response(symbol: str):
     return signal_engine.get_signal(symbol)
 
-@app.get("/signals/all")
-def get_all_signals():
-    """جلب إشارات لجميع الأزواج المدعومة دفعة واحدة"""
+def get_all_signals_response():
     return signal_engine.get_all_signals()
 
-# ============================================================
-# 5. نقاط النهاية - البيانات والصفقات
-# ============================================================
-
-@app.get("/candles")
-def get_candles():
-    """جلب آخر 30 شمعة للرمز الافتراضي"""
-    df = broker.get_candles(symbol, Config.TIMEFRAME, 30)
-    if df is None or df.empty:
-        return {"candles": []}
-    candles = []
-    for index, row in df.iterrows():
-        candles.append({
-            "time": index.strftime("%H:%M"),
-            "open": round(row["open"], 2),
-            "high": round(row["high"], 2),
-            "low": round(row["low"], 2),
-            "close": round(row["close"], 2)
-        })
-    return {"candles": candles}
-
-@app.get("/status")
-def get_status():
-    """حالة المحفظة الورقية"""
-    return paper.get_summary()
-
-@app.get("/trades")
-def get_trades():
-    """قائمة الصفقات المفتوحة والمغلقة"""
-    return {
-        "open": paper.get_open_positions(),
-        "history": paper.get_trade_history()
-    }
-
-@app.post("/trade")
-def execute_trade(req: TradeRequest):
-    """تنفيذ صفقة وهمية"""
-    can, msg = paper.can_trade(Config.MAX_TRADES_PER_DAY, 0.05)
-    if not can:
-        raise HTTPException(400, msg)
-    if req.volume <= 0:
-        risk = paper.balance * Config.RISK_PER_TRADE
-        sl_dist = abs(req.entry - req.sl)
-        req.volume = round(risk / sl_dist if sl_dist > 0 else 0.01, 2)
-    if req.volume <= 0:
-        raise HTTPException(400, "حجم غير صالح")
-    success, result = paper.open_trade(req.symbol, req.side, req.entry, req.sl, req.tp, req.volume)
-    if not success:
-        raise HTTPException(400, result)
-    return {"status": "success", "trade": result}
 
 # ============================================================
-# 6. بدء التشغيل - تشغيل المحدّث التلقائي
+# 4. حلقة تحديث تلقائي
 # ============================================================
+async def auto_update_signals(interval: int = 60):
+    while True:
+        try:
+            symbols = ["EURUSD=X", "GBPUSD=X", "XAUUSD=X", "BTCUSDT", "ETHUSDT"]
+            signal_engine.get_all_signals(symbols)
+            logger.info(f"🔄 تم تحديث الإشارات تلقائياً: {len(symbols)} رمز")
+        except Exception as e:
+            logger.error(f"❌ خطأ في التحديث التلقائي: {e}")
+        await asyncio.sleep(interval)
 
-@app.on_event("startup")
-def startup_signal_updater():
-    """تشغيل تحديث الإشارات التلقائي في الخلفية"""
-    try:
-        start_auto_updater()
-        logger.info("🚀 تم تشغيل المحدّث التلقائي للإشارات")
-    except Exception as e:
-        logger.warning(f"⚠️ فشل تشغيل المحدّث التلقائي: {e}")
+def start_auto_updater():
+    import threading
+    def run():
+        asyncio.run(auto_update_signals(60))
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    logger.info("🚀 تم تشغيل المحدّث التلقائي للإشارات")
