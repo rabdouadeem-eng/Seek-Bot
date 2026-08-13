@@ -1,6 +1,6 @@
 # app/signal_server.py
 # ============================================================
-# 🔍 Seek Bot - خادم الإشارات النهائي (Binance فقط)
+# 🔍 Seek Bot - خادم الإشارات (Binance فقط) - نسخة محسنة
 # ============================================================
 
 import asyncio
@@ -19,13 +19,19 @@ class DataSourceManager:
         self.binance = BinanceBroker()
         self.cache = {}
     
-    def get_candles(self, symbol: str, timeframe: str = "15m", limit: int = 30):
+    def get_candles(self, symbol: str, timeframe: str = None, limit: int = 100):
+        """جلب البيانات مع حد أدنى 100 شمعة لضمان كفاية البيانات"""
+        if timeframe is None:
+            timeframe = Config.TIMEFRAME
         try:
             df = self.binance.get_candles(symbol, timeframe, limit)
             if df is not None and not df.empty:
+                logger.info(f"✅ تم جلب {len(df)} شمعة لـ {symbol}")
                 return df
+            else:
+                logger.warning(f"⚠️ بيانات فارغة لـ {symbol}")
         except Exception as e:
-            logger.error(f"فشل جلب {symbol} من Binance: {e}")
+            logger.error(f"❌ فشل جلب {symbol} من Binance: {e}")
         return None
 
 
@@ -38,7 +44,9 @@ class SignalEngine:
         if lookback is None:
             lookback = Config.LOOKBACK_CANDLES
         
-        df = self.data_manager.get_candles(symbol, Config.TIMEFRAME, lookback + 10)
+        # جلب عدد كافٍ من الشموع (lookback + 20 للاحتياط)
+        df = self.data_manager.get_candles(symbol, Config.TIMEFRAME, lookback + 20)
+        
         if df is None or df.empty:
             return {
                 "symbol": symbol,
@@ -51,12 +59,26 @@ class SignalEngine:
                 "timestamp": datetime.now().isoformat()
             }
         
+        # التأكد من أن عدد الشموع كافٍ
+        if len(df) < lookback + 5:
+            return {
+                "symbol": symbol,
+                "type": "HOLD",
+                "entry": 0,
+                "sl": 0,
+                "tp": 0,
+                "confidence": 0.0,
+                "reason": f"عدد الشموع غير كافٍ ({len(df)} < {lookback + 5})",
+                "timestamp": datetime.now().isoformat()
+            }
+        
         sig = detect_signal(df, lookback)
         if sig:
             sig["symbol"] = symbol
             sig["timestamp"] = datetime.now().isoformat()
             sig["reason"] = self._generate_reason(sig, df)
             self.last_signals[symbol] = sig
+            logger.info(f"📊 إشارة {sig['type']} لـ {symbol} بثقة {sig['confidence']}")
             return sig
         else:
             return {
@@ -66,7 +88,7 @@ class SignalEngine:
                 "sl": 0,
                 "tp": 0,
                 "confidence": 0.0,
-                "reason": "لا توجد إشارة واضحة",
+                "reason": "لا توجد إشارة واضحة (الشروط غير متحققة)",
                 "timestamp": datetime.now().isoformat()
             }
     
