@@ -1,23 +1,48 @@
 # app/main.py
+# ============================================================
+# 🔍 Seek Bot - الخادم الرئيسي مع خادم إشارات متكامل
+# ============================================================
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import logging
 from .config import Config
-from .broker import YahooBroker
+from .broker import YahooBroker, BinanceBroker
 from .strategy import detect_signal
 from .paper_trading import PaperTrading
+
+# استيراد خادم الإشارات
+from .signal_server import SignalEngine, start_auto_updater
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Seek Bot", version="1.0")
+app = FastAPI(title="Seek Bot - Signal Server", version="2.0")
 
-broker = YahooBroker()
-symbol = Config.SYMBOL_YAHOO
+# ============================================================
+# 1. تهيئة المصادر
+# ============================================================
 
-logger.info(f"📡 المصدر: Yahoo | الرمز: {symbol}")
+# اختيار المصدر حسب الإعداد
+if Config.DATA_SOURCE.lower() == "binance":
+    broker = BinanceBroker()
+    symbol = Config.SYMBOL
+else:
+    broker = YahooBroker()
+    symbol = Config.SYMBOL_YAHOO
+
+logger.info(f"📡 المصدر: {Config.DATA_SOURCE} | الرمز: {symbol}")
+
+# تهيئة التداول الورقي
 paper = PaperTrading(Config.INITIAL_BALANCE)
+
+# تهيئة محرك الإشارات (للمعالجة المتعددة)
+signal_engine = SignalEngine()
+
+# ============================================================
+# 2. نماذج البيانات
+# ============================================================
 
 class TradeRequest(BaseModel):
     symbol: str
@@ -26,12 +51,41 @@ class TradeRequest(BaseModel):
     sl: float
     tp: float
 
+# ============================================================
+# 3. نقاط النهاية - الواجهة الرئيسية
+# ============================================================
+
 @app.get("/")
 def root():
-    return HTMLResponse("<h1>🔍 Seek Bot يعمل على Yahoo</h1><p>افتح /signal أو /candles للتحقق.</p>")
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head><title>🔍 Seek Bot</title></head>
+    <body style="font-family: sans-serif; background: #0E1116; color: #E6EDF3; padding: 20px;">
+        <h1>🔍 Seek Bot - خادم الإشارات</h1>
+        <p>✅ البوت يعمل على <strong>{}</strong></p>
+        <hr>
+        <h3>📊 نقاط النهاية المتاحة:</h3>
+        <ul>
+            <li><a href="/signal" style="color: #FBBF24;">/signal</a> - الإشارة الحالية</li>
+            <li><a href="/signals/all" style="color: #FBBF24;">/signals/all</a> - جميع الإشارات (فوركس + ذهب + عملات)</li>
+            <li><a href="/signal/EURUSD=X" style="color: #FBBF24;">/signal/EURUSD=X</a> - إشارة لرمز معين</li>
+            <li><a href="/candles" style="color: #FBBF24;">/candles</a> - بيانات الشموع</li>
+            <li><a href="/status" style="color: #FBBF24;">/status</a> - حالة المحفظة</li>
+        </ul>
+        <p style="color: #8B949E; margin-top: 20px;">⚡ جميع الصفقات وهمية (Paper Trading)</p>
+    </body>
+    </html>
+    """.format(Config.DATA_SOURCE.upper())
+    return HTMLResponse(html)
+
+# ============================================================
+# 4. نقاط النهاية - الإشارات (الأساسية)
+# ============================================================
 
 @app.get("/signal")
 def get_signal():
+    """إشارة للرمز الافتراضي"""
     df = broker.get_candles(symbol, Config.TIMEFRAME, Config.LOOKBACK_CANDLES + 10)
     logger.info(f"📊 عدد الشموع: {len(df) if df is not None else 0}")
     if df is None:
@@ -39,8 +93,23 @@ def get_signal():
     sig = detect_signal(df, Config.LOOKBACK_CANDLES)
     return sig or {"type": None, "entry": 0, "sl": 0, "tp": 0, "confidence": 0}
 
+@app.get("/signal/{symbol}")
+def get_signal_by_symbol(symbol: str):
+    """إشارة لرمز معين (مثل /signal/EURUSD=X)"""
+    return signal_engine.get_signal(symbol)
+
+@app.get("/signals/all")
+def get_all_signals():
+    """جلب إشارات لجميع الأزواج المدعومة دفعة واحدة"""
+    return signal_engine.get_all_signals()
+
+# ============================================================
+# 5. نقاط النهاية - البيانات والصفقات
+# ============================================================
+
 @app.get("/candles")
 def get_candles():
+    """جلب آخر 30 شمعة للرمز الافتراضي"""
     df = broker.get_candles(symbol, Config.TIMEFRAME, 30)
     if df is None or df.empty:
         return {"candles": []}
@@ -57,14 +126,20 @@ def get_candles():
 
 @app.get("/status")
 def get_status():
+    """حالة المحفظة الورقية"""
     return paper.get_summary()
 
 @app.get("/trades")
 def get_trades():
-    return {"open": paper.get_open_positions(), "history": paper.get_trade_history()}
+    """قائمة الصفقات المفتوحة والمغلقة"""
+    return {
+        "open": paper.get_open_positions(),
+        "history": paper.get_trade_history()
+    }
 
 @app.post("/trade")
 def execute_trade(req: TradeRequest):
+    """تنفيذ صفقة وهمية"""
     can, msg = paper.can_trade(Config.MAX_TRADES_PER_DAY, 0.05)
     if not can:
         raise HTTPException(400, msg)
@@ -78,3 +153,16 @@ def execute_trade(req: TradeRequest):
     if not success:
         raise HTTPException(400, result)
     return {"status": "success", "trade": result}
+
+# ============================================================
+# 6. بدء التشغيل - تشغيل المحدّث التلقائي
+# ============================================================
+
+@app.on_event("startup")
+def startup_signal_updater():
+    """تشغيل تحديث الإشارات التلقائي في الخلفية"""
+    try:
+        start_auto_updater()
+        logger.info("🚀 تم تشغيل المحدّث التلقائي للإشارات")
+    except Exception as e:
+        logger.warning(f"⚠️ فشل تشغيل المحدّث التلقائي: {e}")
