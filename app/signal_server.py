@@ -1,6 +1,6 @@
 # app/signal_server.py
 # ============================================================
-# 🔍 Seek Bot - خادم الإشارات الموحد (متعدد المصادر)
+# 🔍 Seek Bot - خادم الإشارات الموحد (نسخة واضحة)
 # ============================================================
 
 import asyncio
@@ -21,10 +21,11 @@ class DataSourceManager:
         self.cache = {}
     
     def get_broker(self, symbol: str):
-        # يختار المصدر تلقائياً حسب الرمز
-        if "USDT" in symbol or (symbol.endswith("USD") and not "=" in symbol):
+        # ✅ قاعدة واضحة لاختيار المصدر
+        if symbol.endswith("USDT") or (symbol.endswith("USD") and "=" not in symbol):
             return self.binance
-        return self.yahoo
+        else:
+            return self.yahoo
     
     def get_candles(self, symbol: str, timeframe: str = "1h", limit: int = 30):
         broker = self.get_broker(symbol)
@@ -35,6 +36,7 @@ class DataSourceManager:
         except Exception as e:
             logger.warning(f"فشل جلب {symbol} من المصدر الأساسي: {e}")
         
+        # محاولة المصدر البديل (اختياري)
         fallback_broker = self.yahoo if isinstance(broker, BinanceBroker) else self.binance
         try:
             df = fallback_broker.get_candles(symbol, timeframe, limit)
@@ -88,12 +90,11 @@ class SignalEngine:
             }
     
     def get_all_signals(self, symbols: List[str] = None) -> Dict[str, dict]:
-        # ✅ قائمة موحدة تضم الفوركس، الذهب، والعملات الرقمية
         if symbols is None:
             symbols = [
                 "EURUSD=X", "GBPUSD=X", "XAUUSD=X",   # Yahoo
                 "BTCUSDT", "ETHUSDT", "BNBUSDT",      # Binance
-                "SOLUSDT", "XRPUSDT"                  # Binance إضافية
+                "SOLUSDT", "XRPUSDT"                  # Binance
             ]
         
         results = {}
