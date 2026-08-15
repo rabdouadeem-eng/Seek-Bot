@@ -1,6 +1,6 @@
 # app/signal_server.py
 # ============================================================
-# 🔍 Seek Bot - خادم الإشارات (DataBroker)
+# 🔍 Seek Bot - خادم الإشارات (DataBroker) — عملة واحدة فقط
 # ============================================================
 
 import asyncio
@@ -14,10 +14,22 @@ from .strategy import detect_signal
 
 logger = logging.getLogger(__name__)
 
+# ✅ لائحة كريبتو منفصلة تماماً عن الرمز الرئيسي (BTC + meme coins)
+CRYPTO_WATCHLIST = ["BTCUSDT", "DOGEUSDT", "SHIBUSDT", "PEPEUSDT"]
+
+
+def get_active_symbol() -> str:
+    """الرمز الوحيد المفعّل، حسب مصدر البيانات المختار في .env"""
+    broker_tmp = DataBroker()
+    if broker_tmp.data_source == "yahoo":
+        return Config.SYMBOL_YAHOO
+    return Config.SYMBOL
+
+
 class DataSourceManager:
     def __init__(self):
         self.broker = DataBroker()  # ✅ استخدم DataBroker
-    
+
     def get_candles(self, symbol: str, timeframe: str = None, limit: int = 100):
         if timeframe is None:
             timeframe = Config.TIMEFRAME
@@ -35,13 +47,17 @@ class SignalEngine:
     def __init__(self):
         self.data_manager = DataSourceManager()
         self.last_signals = {}
-    
-    def get_signal(self, symbol: str, lookback: int = None) -> dict:
+        # ✅ عملة واحدة فقط، مأخوذة من الإعدادات (لا مزيد من لائحة عملات ثابتة)
+        self.active_symbol = get_active_symbol()
+
+    def get_signal(self, symbol: str = None, lookback: int = None) -> dict:
+        if symbol is None:
+            symbol = self.active_symbol
         if lookback is None:
             lookback = Config.LOOKBACK_CANDLES
-        
+
         df = self.data_manager.get_candles(symbol, Config.TIMEFRAME, lookback + 20)
-        
+
         if df is None or df.empty:
             return {
                 "symbol": symbol,
@@ -53,7 +69,7 @@ class SignalEngine:
                 "reason": "بيانات غير كافية",
                 "timestamp": datetime.now().isoformat()
             }
-        
+
         if len(df) < lookback + 5:
             return {
                 "symbol": symbol,
@@ -65,7 +81,7 @@ class SignalEngine:
                 "reason": f"عدد الشموع غير كافٍ ({len(df)} < {lookback + 5})",
                 "timestamp": datetime.now().isoformat()
             }
-        
+
         sig = detect_signal(df, lookback)
         if sig:
             sig["symbol"] = symbol
@@ -85,17 +101,25 @@ class SignalEngine:
                 "reason": "لا توجد إشارة واضحة",
                 "timestamp": datetime.now().isoformat()
             }
-    
+
     def get_all_signals(self, symbols: List[str] = None) -> Dict[str, dict]:
+        """✅ الآن يرجع إشارة العملة الواحدة المفعّلة فقط، إلا إذا زُوّدت لائحة صراحةً"""
         if symbols is None:
-            symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT"]
-        
+            symbols = [self.active_symbol]
+
         results = {}
         for sym in symbols:
             results[sym] = self.get_signal(sym)
-        
+
         return results
-    
+
+    def get_crypto_signals(self) -> Dict[str, dict]:
+        """✅ إشارات الكريبتو (BTC + meme coins) — منفصلة تماماً عن الرمز الرئيسي"""
+        results = {}
+        for sym in CRYPTO_WATCHLIST:
+            results[sym] = self.get_signal(sym)
+        return results
+
     def _generate_reason(self, sig: dict, df) -> str:
         if sig["type"] == "BUY":
             reasons = []
@@ -106,7 +130,7 @@ class SignalEngine:
             if sig.get("confidence", 0) > 0.7:
                 reasons.append("ثقة عالية")
             return " + ".join(reasons) if reasons else "إشارة شراء"
-        
+
         elif sig["type"] == "SELL":
             reasons = []
             last = df.iloc[-1]
@@ -116,13 +140,13 @@ class SignalEngine:
             if sig.get("confidence", 0) > 0.7:
                 reasons.append("ثقة عالية")
             return " + ".join(reasons) if reasons else "إشارة بيع"
-        
+
         return "لا توجد إشارة"
 
 
 signal_engine = SignalEngine()
 
-def get_signal_response(symbol: str):
+def get_signal_response(symbol: str = None):
     return signal_engine.get_signal(symbol)
 
 def get_all_signals_response():
@@ -130,11 +154,11 @@ def get_all_signals_response():
 
 
 async def auto_update_signals(interval: int = 60):
+    """✅ يحدّث إشارة العملة الواحدة المفعّلة فقط كل interval ثانية"""
     while True:
         try:
-            symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT"]
-            signal_engine.get_all_signals(symbols)
-            logger.info(f"🔄 تم تحديث الإشارات تلقائياً: {len(symbols)} رمز")
+            signal_engine.get_all_signals()
+            logger.info(f"🔄 تم تحديث إشارة {signal_engine.active_symbol} تلقائياً")
         except Exception as e:
             logger.error(f"❌ خطأ في التحديث التلقائي: {e}")
         await asyncio.sleep(interval)
@@ -145,4 +169,5 @@ def start_auto_updater():
         asyncio.run(auto_update_signals(60))
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
-    logger.info("🚀 تم تشغيل المحدّث التلقائي للإشارات (DataBroker)")
+    logger.info(f"🚀 تم تشغيل المحدّث التلقائي للإشارات — عملة واحدة: {signal_engine.active_symbol}")
+            
