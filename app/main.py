@@ -109,7 +109,6 @@ def execute_trade(req: TradeRequest):
 @app.post("/settings")
 def save_settings(req: SettingsRequest):
     # هنا يمكنك حفظ الإعدادات في ملف أو قاعدة بيانات
-    # حالياً سنعيدها فقط للتأكيد
     return {
         "status": "saved",
         "capital": req.capital,
