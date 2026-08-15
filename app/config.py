@@ -21,4 +21,13 @@ class Config:
 
     # إعدادات Yahoo (اختياري)
     SYMBOL_YAHOO = os.getenv("SYMBOL_YAHOO", "XAUUSD=X")
+
+    # إعدادات OANDA (فوركس/ذهب حقيقي عبر REST API — موثوق أكثر من Yahoo على Render)
+    OANDA_API_KEY = os.getenv("OANDA_API_KEY", "")
+    OANDA_ENV = os.getenv("OANDA_ENV", "practice")  # practice أو live
+    SYMBOL_OANDA = os.getenv("SYMBOL_OANDA", "XAU_USD")
+
+    # إعدادات Twelve Data (فوركس/ذهب — بديل OANDA غير المتاح في الجزائر)
+    TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY", "")
+    SYMBOL_TWELVEDATA = os.getenv("SYMBOL_TWELVEDATA", "XAU/USD")
     
