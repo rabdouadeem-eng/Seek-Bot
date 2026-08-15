@@ -181,7 +181,29 @@ def dashboard():
                 <div class="box"><div class="val">-</div><div class="lbl">الربح/الخسارة</div></div>
                 <div class="box"><div class="val">-</div><div class="lbl">صفقات مفتوحة</div></div>
                 <div class="box"><div class="val">-</div><div class="lbl">إجمالي الصفقات</div></div>
+                <div class="box"><div class="val">-</div><div class="lbl">رابحة</div></div>
+                <div class="box"><div class="val">-</div><div class="lbl">خاسرة</div></div>
+                <div class="box"><div class="val">-</div><div class="lbl">نسبة النجاح</div></div>
+                <div class="box"><div class="val">-</div><div class="lbl">صفقات اليوم</div></div>
             </div>
+        </div>
+
+        <div class="card">
+            <h3>سجل الصفقات (Paper Trading)</h3>
+            <table id="trades-table" style="width:100%; border-collapse: collapse; font-size: 13px;">
+                <thead>
+                    <tr style="color:#8B949E; text-align: right;">
+                        <th style="padding:4px;">الحالة</th>
+                        <th style="padding:4px;">الاتجاه</th>
+                        <th style="padding:4px;">دخول</th>
+                        <th style="padding:4px;">خروج</th>
+                        <th style="padding:4px;">ربح $</th>
+                    </tr>
+                </thead>
+                <tbody id="trades-body">
+                    <tr><td colspan="5" style="padding:8px; color:#8B949E;">جاري التحميل...</td></tr>
+                </tbody>
+            </table>
         </div>
 
         <div class="card">
@@ -209,13 +231,36 @@ def dashboard():
 
             try {
                 const st = await (await fetch('/status')).json();
+                const winRate = (st.wins + st.losses) > 0 ? Math.round((st.wins / (st.wins + st.losses)) * 100) : '-';
                 document.getElementById('status-box').innerHTML = `
                     <div class="box"><div class="val">$${st.balance ?? '-'}</div><div class="lbl">الرصيد</div></div>
                     <div class="box"><div class="val">$${st.total_pnl ?? '-'}</div><div class="lbl">الربح/الخسارة</div></div>
                     <div class="box"><div class="val">${st.open_positions ?? '-'}</div><div class="lbl">صفقات مفتوحة</div></div>
                     <div class="box"><div class="val">${st.total_trades ?? '-'}</div><div class="lbl">إجمالي الصفقات</div></div>
+                    <div class="box"><div class="val buy">${st.wins ?? '-'}</div><div class="lbl">رابحة</div></div>
+                    <div class="box"><div class="val sell">${st.losses ?? '-'}</div><div class="lbl">خاسرة</div></div>
+                    <div class="box"><div class="val">${winRate}${winRate !== '-' ? '%' : ''}</div><div class="lbl">نسبة النجاح</div></div>
+                    <div class="box"><div class="val">${st.daily_trades ?? '-'}</div><div class="lbl">صفقات اليوم</div></div>
                 `;
             } catch (e) {}
+
+            try {
+                const tr = await (await fetch('/trades')).json();
+                const rows = [];
+                (tr.open || []).forEach(t => rows.push({...t, status: 'مفتوحة'}));
+                (tr.history || []).slice(-20).reverse().forEach(t => rows.push({...t, status: 'مغلقة'}));
+                document.getElementById('trades-body').innerHTML = rows.length ? rows.map(t => `
+                    <tr style="border-top:1px solid #21262D;">
+                        <td style="padding:4px;">${t.status}</td>
+                        <td style="padding:4px;" class="${t.side === 'BUY' ? 'buy' : 'sell'}">${t.side}</td>
+                        <td style="padding:4px;">${t.entry ?? '-'}</td>
+                        <td style="padding:4px;">${t.exit ?? '-'}</td>
+                        <td style="padding:4px;" class="${(t.profit ?? 0) >= 0 ? 'buy' : 'sell'}">${t.profit ?? '-'}</td>
+                    </tr>
+                `).join('') : '<tr><td colspan="5" style="padding:8px; color:#8B949E;">لا توجد صفقات بعد</td></tr>';
+            } catch (e) {
+                document.getElementById('trades-body').innerHTML = '<tr><td colspan="5" style="padding:8px;">تعذر جلب الصفقات</td></tr>';
+            }
 
             try {
                 const c = await (await fetch('/candles')).json();
