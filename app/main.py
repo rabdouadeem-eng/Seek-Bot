@@ -134,6 +134,107 @@ def get_candles():
         })
     return {"candles": candles}
 
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard():
+    """✅ لوحة تحكم بصرية لـ Seek Bot (تعرض الإشارة، الشموع، وحالة المحفظة)"""
+    html = """
+    <!DOCTYPE html>
+    <html dir="rtl" lang="ar">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>🔍 Seek Bot - لوحة التحكم</title>
+        <style>
+            body { font-family: sans-serif; background: #0E1116; color: #E6EDF3; padding: 16px; margin: 0; }
+            h1 { font-size: 20px; margin-bottom: 4px; }
+            .sub { color: #8B949E; font-size: 13px; margin-bottom: 16px; }
+            .card { background: #161B22; border: 1px solid #30363D; border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+            .card h3 { margin: 0 0 10px 0; font-size: 15px; color: #8B949E; }
+            .signal-type { font-size: 24px; font-weight: bold; }
+            .buy { color: #3FB950; }
+            .sell { color: #F85149; }
+            .hold { color: #D29922; }
+            .price { font-size: 18px; color: #E6EDF3; margin-top: 4px; }
+            .row { display: flex; justify-content: space-between; margin: 6px 0; font-size: 14px; }
+            .row span:first-child { color: #8B949E; }
+            .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px; background: #21262D; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+            .grid .box { background: #0D1117; border-radius: 8px; padding: 10px; text-align: center; }
+            .grid .box .val { font-size: 20px; font-weight: bold; }
+            .grid .box .lbl { font-size: 12px; color: #8B949E; }
+            #refresh-note { color: #8B949E; font-size: 12px; text-align: center; margin-top: 10px; }
+        </style>
+    </head>
+    <body>
+        <h1>🔍 Seek Bot</h1>
+        <div class="sub">لوحة تحكم بصرية — استراتيجية القيعان والقمم</div>
+
+        <div class="card">
+            <h3>الإشارة الحالية</h3>
+            <div id="signal-box">جاري التحميل...</div>
+        </div>
+
+        <div class="card">
+            <h3>حالة المحفظة (Paper Trading)</h3>
+            <div class="grid" id="status-box">
+                <div class="box"><div class="val">-</div><div class="lbl">الرصيد</div></div>
+                <div class="box"><div class="val">-</div><div class="lbl">الربح/الخسارة</div></div>
+                <div class="box"><div class="val">-</div><div class="lbl">صفقات مفتوحة</div></div>
+                <div class="box"><div class="val">-</div><div class="lbl">إجمالي الصفقات</div></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>آخر الأسعار (30 شمعة)</h3>
+            <div id="candles-box">جاري التحميل...</div>
+        </div>
+
+        <div id="refresh-note">يتحدث تلقائياً كل 30 ثانية</div>
+
+        <script>
+        async function loadData() {
+            try {
+                const sig = await (await fetch('/signal')).json();
+                const cls = sig.type === 'BUY' ? 'buy' : sig.type === 'SELL' ? 'sell' : 'hold';
+                document.getElementById('signal-box').innerHTML = `
+                    <div class="signal-type ${cls}">${sig.type || 'HOLD'} ${sig.confidence ? '('+Math.round(sig.confidence*100)+'%)' : ''}</div>
+                    <div class="price">السعر: ${sig.entry || '-'}</div>
+                    <div class="row"><span>وقف الخسارة (SL)</span><span>${sig.sl || '-'}</span></div>
+                    <div class="row"><span>جني الأرباح (TP)</span><span>${sig.tp || '-'}</span></div>
+                    ${sig.reason ? '<div class="row"><span>السبب</span><span class="badge">'+sig.reason+'</span></div>' : ''}
+                `;
+            } catch (e) {
+                document.getElementById('signal-box').innerHTML = 'تعذر جلب الإشارة';
+            }
+
+            try {
+                const st = await (await fetch('/status')).json();
+                document.getElementById('status-box').innerHTML = `
+                    <div class="box"><div class="val">$${st.balance ?? '-'}</div><div class="lbl">الرصيد</div></div>
+                    <div class="box"><div class="val">$${st.total_pnl ?? '-'}</div><div class="lbl">الربح/الخسارة</div></div>
+                    <div class="box"><div class="val">${st.open_positions ?? '-'}</div><div class="lbl">صفقات مفتوحة</div></div>
+                    <div class="box"><div class="val">${st.total_trades ?? '-'}</div><div class="lbl">إجمالي الصفقات</div></div>
+                `;
+            } catch (e) {}
+
+            try {
+                const c = await (await fetch('/candles')).json();
+                const last5 = (c.candles || []).slice(-5).reverse();
+                document.getElementById('candles-box').innerHTML = last5.map(k =>
+                    `<div class="row"><span>${k.time}</span><span>${k.close}</span></div>`
+                ).join('') || 'لا توجد بيانات';
+            } catch (e) {
+                document.getElementById('candles-box').innerHTML = 'تعذر جلب الشموع';
+            }
+        }
+        loadData();
+        setInterval(loadData, 30000);
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(html)
+
 @app.get("/status")
 def get_status():
     """حالة المحفظة الورقية"""
@@ -165,14 +266,63 @@ def execute_trade(req: TradeRequest):
     return {"status": "success", "trade": result}
 
 # ============================================================
-# 6. بدء التشغيل - تشغيل المحدّث التلقائي
+# 6. بدء التشغيل - تشغيل المحدّث التلقائي + التداول التلقائي
 # ============================================================
+
+AUTO_TRADE_MIN_CONFIDENCE = 0.8  # ✅ عتبة عالية (مطابقة لـ PRO-TRADING-BOT)
+
+async def auto_trade_loop(interval: int = 60):
+    """✅ يفتح الصفقة تلقائياً ويسجلها عند بلوغ الثقة العتبة العالية، ويغلق الصفقات عند SL/TP"""
+    import asyncio
+    while True:
+        try:
+            sig = signal_engine.get_signal(signal_engine.active_symbol)
+
+            # إغلاق الصفقات المفتوحة إذا بلغت SL/TP
+            current_price = broker.get_current_price(signal_engine.active_symbol)
+            if current_price:
+                closed = paper.check_sl_tp(signal_engine.active_symbol, current_price)
+                for c in closed:
+                    logger.info(f"🔴 أُغلقت تلقائياً {c['side']} {c['symbol']} | الربح: ${c['profit']}")
+
+            # فتح صفقة جديدة تلقائياً عند ثقة عالية، وفقط إذا لا توجد صفقة مفتوحة لنفس الرمز
+            if sig.get("type") in ("BUY", "SELL") and sig.get("confidence", 0) >= AUTO_TRADE_MIN_CONFIDENCE:
+                already_open = any(
+                    p["symbol"] == signal_engine.active_symbol and p["status"] == "OPEN"
+                    for p in paper.get_open_positions()
+                )
+                if not already_open:
+                    can, msg = paper.can_trade(Config.MAX_TRADES_PER_DAY, 0.05)
+                    if can:
+                        success, result = paper.open_trade(
+                            signal_engine.active_symbol, sig["type"],
+                            sig["entry"], sig["sl"], sig["tp"]
+                        )
+                        if success:
+                            logger.info(f"🟢 صفقة تلقائية {sig['type']} {signal_engine.active_symbol} بثقة {sig['confidence']}")
+                    else:
+                        logger.info(f"⏸️ تخطي الفتح التلقائي: {msg}")
+        except Exception as e:
+            logger.error(f"❌ خطأ في التداول التلقائي: {e}")
+        await asyncio.sleep(interval)
+
+def start_auto_trader():
+    import threading, asyncio as _asyncio
+    def run():
+        _asyncio.run(auto_trade_loop(60))
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    logger.info(f"🤖 تم تشغيل التداول التلقائي — عتبة الثقة: {AUTO_TRADE_MIN_CONFIDENCE}")
 
 @app.on_event("startup")
 def startup_signal_updater():
-    """تشغيل تحديث الإشارات التلقائي في الخلفية"""
+    """تشغيل تحديث الإشارات التلقائي والتداول التلقائي في الخلفية"""
     try:
         start_auto_updater()
         logger.info("🚀 تم تشغيل المحدّث التلقائي للإشارات")
     except Exception as e:
         logger.warning(f"⚠️ فشل تشغيل المحدّث التلقائي: {e}")
+    try:
+        start_auto_trader()
+    except Exception as e:
+        logger.warning(f"⚠️ فشل تشغيل التداول التلقائي: {e}")
