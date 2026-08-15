@@ -24,11 +24,12 @@ app = FastAPI(title="Seek Bot - Signal Server", version="2.0")
 # 1. تهيئة المصادر
 # ============================================================
 
-# ✅ استخدام DataBroker (يجمع بين Binance و CoinCap)
+# ✅ استخدام DataBroker (يجمع بين Binance و CoinCap، أو Yahoo حسب DATA_SOURCE)
 broker = DataBroker()
-symbol = Config.SYMBOL  # استخدام الرمز من الإعدادات (BTCUSDT)
+# ✅ اختيار الرمز الصحيح حسب المصدر (Yahoo يحتاج SYMBOL_YAHOO مثل XAUUSD=X)
+symbol = Config.SYMBOL_YAHOO if broker.data_source == "yahoo" else Config.SYMBOL
 
-logger.info(f"📡 المصدر: DataBroker (Binance → CoinCap) | الرمز: {symbol}")
+logger.info(f"📡 المصدر: DataBroker ({broker.data_source}) | الرمز: {symbol}")
 
 # تهيئة التداول الورقي
 paper = PaperTrading(Config.INITIAL_BALANCE)
@@ -43,6 +44,7 @@ signal_engine = SignalEngine()
 class TradeRequest(BaseModel):
     symbol: str
     side: str
+    entry: float          # ✅ كان ناقص — /trade كان يستعمله فيطيح بخطأ
     volume: float = 0
     sl: float
     tp: float
@@ -98,6 +100,11 @@ def get_signal_by_symbol(symbol: str):
 def get_all_signals():
     """جلب إشارات لجميع الأزواج المدعومة دفعة واحدة"""
     return signal_engine.get_all_signals()
+
+@app.get("/signals/crypto")
+def get_crypto_signals():
+    """✅ إشارات الكريبتو (BTC + meme coins) — منفصلة عن الرمز الرئيسي"""
+    return signal_engine.get_crypto_signals()
 
 # ============================================================
 # 5. نقاط النهاية - البيانات والصفقات
