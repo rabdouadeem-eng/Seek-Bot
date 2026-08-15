@@ -26,8 +26,15 @@ app = FastAPI(title="Seek Bot - Signal Server", version="2.0")
 
 # ✅ استخدام DataBroker (يجمع بين Binance و CoinCap، أو Yahoo حسب DATA_SOURCE)
 broker = DataBroker()
-# ✅ اختيار الرمز الصحيح حسب المصدر (Yahoo يحتاج SYMBOL_YAHOO مثل XAUUSD=X)
-symbol = Config.SYMBOL_YAHOO if broker.data_source == "yahoo" else Config.SYMBOL
+# ✅ اختيار الرمز الصحيح حسب المصدر
+if broker.data_source == "twelvedata":
+    symbol = Config.SYMBOL_TWELVEDATA
+elif broker.data_source == "oanda":
+    symbol = Config.SYMBOL_OANDA
+elif broker.data_source == "yahoo":
+    symbol = Config.SYMBOL_YAHOO
+else:
+    symbol = Config.SYMBOL
 
 logger.info(f"📡 المصدر: DataBroker ({broker.data_source}) | الرمز: {symbol}")
 
