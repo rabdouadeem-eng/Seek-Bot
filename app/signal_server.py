@@ -21,6 +21,10 @@ CRYPTO_WATCHLIST = ["BTCUSDT", "DOGEUSDT", "SHIBUSDT", "PEPEUSDT"]
 def get_active_symbol() -> str:
     """الرمز الوحيد المفعّل، حسب مصدر البيانات المختار في .env"""
     broker_tmp = DataBroker()
+    if broker_tmp.data_source == "twelvedata":
+        return Config.SYMBOL_TWELVEDATA
+    if broker_tmp.data_source == "oanda":
+        return Config.SYMBOL_OANDA
     if broker_tmp.data_source == "yahoo":
         return Config.SYMBOL_YAHOO
     return Config.SYMBOL
@@ -170,4 +174,4 @@ def start_auto_updater():
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
     logger.info(f"🚀 تم تشغيل المحدّث التلقائي للإشارات — عملة واحدة: {signal_engine.active_symbol}")
-            
+        
