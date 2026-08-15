@@ -1,6 +1,6 @@
 # app/main.py
 # ============================================================
-# 🔍 Seek Bot - داشبورد متكامل (مثل Pro Trading Bot)
+# 🔍 Seek Bot - داشبورد احترافي (مستوحى من Pro Trading Bot)
 # ============================================================
 
 from fastapi import FastAPI, HTTPException
@@ -18,11 +18,19 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Seek Bot - Dashboard", version="2.0")
 
+# ============================================================
+# 1. تهيئة المكونات
+# ============================================================
 broker = DataBroker()
 symbol = Config.SYMBOL
 paper = PaperTrading(Config.INITIAL_BALANCE)
 signal_engine = SignalEngine()
 
+logger.info(f"📡 المصدر: DataBroker | الرمز: {symbol}")
+
+# ============================================================
+# 2. نماذج البيانات
+# ============================================================
 class TradeRequest(BaseModel):
     symbol: str
     side: str
@@ -30,252 +38,15 @@ class TradeRequest(BaseModel):
     sl: float
     tp: float
 
-# ============================================================
-# الصفحة الرئيسية - داشبورد احترافي
-# ============================================================
-@app.get("/")
-def root():
-    html = """
-    <!DOCTYPE html>
-    <html lang="ar" dir="rtl">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>🔍 Seek Bot - داشبورد</title>
-        <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
-        <style>
-            * { margin:0; padding:0; box-sizing:border-box; }
-            body {
-                font-family: 'Cairo', sans-serif;
-                background: #0E1116;
-                color: #E6EDF3;
-                padding: 20px;
-                min-height: 100vh;
-            }
-            .container { max-width: 1400px; margin:0 auto; }
-            
-            /* Header */
-            .header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px; padding:16px 20px; background:#161B22; border-radius:16px; border:1px solid #262C36; margin-bottom:20px; }
-            .header h1 { color:#FBBF24; font-size:24px; }
-            .header h1 small { color:#8B949E; font-size:14px; font-weight:normal; }
-            .header .status { color:#2EA043; font-size:14px; background:#161B22; padding:6px 14px; border-radius:20px; border:1px solid #2EA043; }
-            
-            /* Cards */
-            .card { background:#161B22; border:1px solid #262C36; border-radius:16px; padding:20px; margin-bottom:16px; }
-            .card-title { color:#FBBF24; font-size:18px; font-weight:600; margin-bottom:16px; border-bottom:1px solid #262C36; padding-bottom:10px; }
-            
-            /* Stats Grid */
-            .stats-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:12px; }
-            .stat-item { background:#0E1116; padding:14px; border-radius:12px; text-align:center; border:1px solid #262C36; }
-            .stat-item .label { color:#8B949E; font-size:12px; }
-            .stat-item .value { font-size:24px; font-weight:700; margin-top:4px; }
-            .stat-item .value.green { color:#2EA043; }
-            .stat-item .value.red { color:#DA3633; }
-            .stat-item .value.gold { color:#FBBF24; }
-            .stat-item .value.blue { color:#58A6FF; }
-            
-            /* Form */
-            .form-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:16px; }
-            .form-group label { display:block; color:#8B949E; font-size:13px; margin-bottom:4px; }
-            .form-group input { width:100%; padding:8px 12px; background:#0E1116; border:1px solid #262C36; border-radius:8px; color:#E6EDF3; font-size:14px; }
-            .form-group input:focus { outline:none; border-color:#FBBF24; }
-            .btn { padding:8px 24px; background:#FBBF24; color:#0E1116; border:none; border-radius:8px; font-weight:600; cursor:pointer; transition:0.3s; font-family:'Cairo',sans-serif; }
-            .btn:hover { opacity:0.8; transform:scale(1.02); }
-            
-            /* Signals */
-            .signal-card { background:#0E1116; border-radius:12px; padding:16px; margin-bottom:12px; border-right:4px solid #8B949E; }
-            .signal-card .header-sig { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
-            .signal-card .pair { font-size:18px; font-weight:700; }
-            .signal-card .price { color:#8B949E; font-size:14px; }
-            .badge { padding:4px 14px; border-radius:20px; font-weight:700; font-size:14px; }
-            .badge-buy { background:#2EA043; color:white; }
-            .badge-sell { background:#DA3633; color:white; }
-            .badge-hold { background:#D29922; color:white; }
-            .signal-card .reason { color:#8B949E; font-size:13px; margin-top:8px; line-height:1.6; background:#161B22; padding:8px 12px; border-radius:8px; }
-            
-            /* Table */
-            .table-wrap { overflow-x:auto; }
-            table { width:100%; border-collapse:collapse; font-size:14px; }
-            th { text-align:right; padding:10px 12px; color:#8B949E; border-bottom:1px solid #262C36; }
-            td { padding:10px 12px; border-bottom:1px solid #1C2128; }
-            .profit-pos { color:#2EA043; }
-            .profit-neg { color:#DA3633; }
-            .empty-msg { color:#8B949E; text-align:center; padding:20px; }
-            
-            .footer { text-align:center; color:#8B949E; font-size:13px; margin-top:20px; border-top:1px solid #262C36; padding-top:20px; }
-            
-            @media (max-width:600px) { .stats-grid { grid-template-columns:1fr 1fr; } .form-grid { grid-template-columns:1fr; } }
-        </style>
-    </head>
-    <body>
-    <div class="container">
-
-        <!-- ===== HEADER ===== -->
-        <div class="header">
-            <h1>🔍 Seek Bot <small>داشبورد التداول الورقي</small></h1>
-            <div class="status">🟢 يعمل | <span id="lastUpdate">جاري التحميل...</span></div>
-        </div>
-
-        <!-- ===== STATS ===== -->
-        <div class="card">
-            <div class="card-title">📊 لوحة الإحصائيات</div>
-            <div class="stats-grid" id="statsGrid">
-                <div class="stat-item"><div class="label">✅ صفقات رابحة</div><div class="value green" id="wins">0</div></div>
-                <div class="stat-item"><div class="label">🎯 نسبة النجاح</div><div class="value gold" id="winRate">0%</div></div>
-                <div class="stat-item"><div class="label">📊 إجمالي الصفقات</div><div class="value blue" id="totalTrades">0</div></div>
-                <div class="stat-item"><div class="label">❌ صفقات خاسرة</div><div class="value red" id="losses">0</div></div>
-            </div>
-        </div>
-
-        <!-- ===== RISK MANAGEMENT ===== -->
-        <div class="card">
-            <div class="card-title">🛡️ رأس المال والمخاطرة</div>
-            <form id="settingsForm" class="form-grid">
-                <div class="form-group"><label>💰 رأس المال ($)</label><input type="number" id="capital" value="10000" step="100"></div>
-                <div class="form-group"><label>⚖️ مخاطرة %</label><input type="number" id="risk" value="2" step="0.5" min="0.5" max="5"></div>
-                <div class="form-group"><label>🎯 هدف الربح %</label><input type="number" id="tp" value="3" step="0.5"></div>
-                <div class="form-group"><label>🛑 وقف الخسارة %</label><input type="number" id="sl" value="1.5" step="0.5"></div>
-                <div class="form-group" style="display:flex; align-items:flex-end;"><button type="submit" class="btn">💾 حفظ الإعدادات</button></div>
-            </form>
-            <div style="margin-top:10px; font-size:13px; color:#8B949E;" id="settingsStatus">الإعدادات الحالية: رأس المال $10000, مخاطرة 2%, TP 3%, SL 1.5%</div>
-        </div>
-
-        <!-- ===== SIGNALS ===== -->
-        <div class="card">
-            <div class="card-title">📈 الإشارات الحية</div>
-            <div id="signalsContainer">⏳ جاري تحميل الإشارات...</div>
-        </div>
-
-        <!-- ===== TRADES ===== -->
-        <div class="card">
-            <div class="card-title">📋 سجل الصفقات (Paper Trading)</div>
-            <div class="table-wrap" id="tradesContainer">
-                <table>
-                    <thead><tr><th>الزوج</th><th>الاتجاه</th><th>دخول</th><th>TP</th><th>SL</th><th>الربح $</th><th>الحالة</th><th>المدة</th></tr></thead>
-                    <tbody id="tradesBody"><tr><td colspan="8" class="empty-msg">لا توجد صفقات بعد</td></tr></tbody>
-                </table>
-            </div>
-        </div>
-
-        <div class="footer">⚡ Seek Bot v2.0 · جميع الصفقات وهمية (Paper Trading) · يتم التحديث تلقائياً كل 15 ثانية</div>
-    </div>
-
-    <script>
-        // ============================================================
-        // JavaScript - تحديث الداشبورد تلقائياً
-        // ============================================================
-        const API = '';
-
-        async function fetchDashboard() {
-            try {
-                // 1. الإحصائيات
-                const statusRes = await fetch(API + '/status');
-                const status = await statusRes.json();
-                document.getElementById('wins').textContent = status.wins || 0;
-                document.getElementById('losses').textContent = status.losses || 0;
-                document.getElementById('totalTrades').textContent = status.total_trades || 0;
-                document.getElementById('winRate').textContent = (status.win_rate || 0) + '%';
-                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('ar-EG');
-
-                // 2. الإشارات
-                const sigRes = await fetch(API + '/signals/all');
-                const signals = await sigRes.json();
-                const sigContainer = document.getElementById('signalsContainer');
-                if (Object.keys(signals).length === 0) {
-                    sigContainer.innerHTML = '<div class="empty-msg">⏸️ لا توجد إشارات حالياً</div>';
-                } else {
-                    let sigHtml = '';
-                    for (const [symbol, data] of Object.entries(signals)) {
-                        const type = data.type || 'HOLD';
-                        const badgeClass = type === 'BUY' ? 'badge-buy' : (type === 'SELL' ? 'badge-sell' : 'badge-hold');
-                        const confidence = (data.confidence * 100).toFixed(0) || 0;
-                        const price = data.entry || '--';
-                        const reason = data.reason || 'لا يوجد سبب محدد';
-                        const displayType = type === 'HOLD' ? 'مراقبة' : type;
-                        sigHtml += `
-                            <div class="signal-card" style="border-right-color: ${type === 'BUY' ? '#2EA043' : (type === 'SELL' ? '#DA3633' : '#D29922')};">
-                                <div class="header-sig">
-                                    <div>
-                                        <span class="pair">${symbol}</span>
-                                        <span class="price">${price}</span>
-                                    </div>
-                                    <div>
-                                        <span class="badge ${badgeClass}">${displayType} (${confidence}%)</span>
-                                    </div>
-                                </div>
-                                <div class="reason">📝 ${reason}</div>
-                                <div style="margin-top:8px; display:flex; gap:10px;">
-                                    <button class="btn" style="background:#2EA043; padding:4px 16px; font-size:12px; color:white;" onclick="alert('تنفيذ شراء وهمي لـ ${symbol}')">شراء</button>
-                                    <button class="btn" style="background:#DA3633; padding:4px 16px; font-size:12px; color:white;" onclick="alert('تنفيذ بيع وهمي لـ ${symbol}')">بيع</button>
-                                </div>
-                            </div>
-                        `;
-                    }
-                    sigContainer.innerHTML = sigHtml;
-                }
-
-                // 3. سجل الصفقات
-                const tradesRes = await fetch(API + '/trades');
-                const tradesData = await tradesRes.json();
-                const history = tradesData.history || [];
-                const tbody = document.getElementById('tradesBody');
-                if (history.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="8" class="empty-msg">📭 لا توجد صفقات بعد</td></tr>';
-                } else {
-                    let rows = '';
-                    // عرض آخر 10 صفقات مقلوبة (الأحدث أولاً)
-                    history.slice(-10).reverse().forEach(t => {
-                        const profitClass = t.profit >= 0 ? 'profit-pos' : 'profit-neg';
-                        const statusText = t.status === 'OPEN' ? '🟢 مفتوحة' : '🔴 مغلقة';
-                        const duration = t.close_time ? '--' : 'قيد التنفيذ';
-                        rows += `<tr>
-                            <td><strong>${t.symbol}</strong></td>
-                            <td><span class="badge ${t.side === 'BUY' ? 'badge-buy' : 'badge-sell'}">${t.side}</span></td>
-                            <td>${t.entry}</td>
-                            <td>${t.tp || '--'}</td>
-                            <td>${t.sl || '--'}</td>
-                            <td class="${profitClass}">${t.profit ? '$'+t.profit.toFixed(2) : '$0.00'}</td>
-                            <td>${statusText}</td>
-                            <td>${duration}</td>
-                        </tr>`;
-                    });
-                    tbody.innerHTML = rows;
-                }
-
-            } catch(e) {
-                console.error('خطأ في التحديث:', e);
-                document.getElementById('signalsContainer').innerHTML = '<div class="empty-msg">⚠️ خطأ في جلب البيانات</div>';
-            }
-        }
-
-        // ============================================================
-        // حفظ الإعدادات (يُظهر رسالة فقط حالياً، لكن يمكن ربطه بـ API)
-        // ============================================================
-        document.getElementById('settingsForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const capital = document.getElementById('capital').value;
-            const risk = document.getElementById('risk').value;
-            const tp = document.getElementById('tp').value;
-            const sl = document.getElementById('sl').value;
-            document.getElementById('settingsStatus').textContent = 
-                `✅ تم حفظ الإعدادات: رأس المال $${capital}, مخاطرة ${risk}%, TP ${tp}%, SL ${sl}% (سيتم تطبيقها في التحديث التالي)`;
-            // هنا يمكن إرسال البيانات إلى نقطة /settings (سنضيفها لاحقاً)
-        });
-
-        // تحميل أولي وتحديث كل 15 ثانية
-        fetchDashboard();
-        setInterval(fetchDashboard, 15000);
-    </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(html)
-
+class SettingsRequest(BaseModel):
+    capital: float
+    risk_percent: float
+    tp_percent: float
+    sl_percent: float
 
 # ============================================================
-# نقاط النهاية (API) - موجودة مسبقاً
+# 3. نقاط النهاية - الإشارات والبيانات
 # ============================================================
-
 @app.get("/signal")
 def get_signal():
     df = broker.get_candles(symbol, Config.TIMEFRAME, Config.LOOKBACK_CANDLES + 10)
@@ -335,6 +106,273 @@ def execute_trade(req: TradeRequest):
         raise HTTPException(400, result)
     return {"status": "success", "trade": result}
 
+@app.post("/settings")
+def save_settings(req: SettingsRequest):
+    # هنا يمكنك حفظ الإعدادات في ملف أو قاعدة بيانات
+    # حالياً سنعيدها فقط للتأكيد
+    return {
+        "status": "saved",
+        "capital": req.capital,
+        "risk": req.risk_percent,
+        "tp": req.tp_percent,
+        "sl": req.sl_percent
+    }
+
+# ============================================================
+# 4. الصفحة الرئيسية - داشبورد متكامل
+# ============================================================
+@app.get("/")
+def root():
+    html = """
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>🔍 Seek Bot - Dashboard</title>
+        <style>
+            * { margin:0; padding:0; box-sizing:border-box; }
+            body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0E1116; color: #E6EDF3; padding: 20px; }
+            .container { max-width: 1400px; margin: 0 auto; }
+            .card { background: #161B22; border: 1px solid #262C36; border-radius: 16px; padding: 20px; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+            h1, h2, h3 { margin-bottom: 12px; }
+            h1 { color: #FBBF24; font-size: 28px; }
+            .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin-bottom: 16px; }
+            .stat-box { background: #0E1116; padding: 16px; border-radius: 12px; border: 1px solid #262C36; text-align: center; }
+            .stat-box .label { font-size: 12px; color: #8B949E; text-transform: uppercase; letter-spacing: 0.5px; }
+            .stat-box .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+            .green { color: #2EA043; } .red { color: #DA3633; } .gold { color: #FBBF24; } .blue { color: #58A6FF; }
+            
+            .signal-card { background: #0E1116; border-radius: 12px; padding: 16px; border: 1px solid #262C36; margin-bottom: 12px; }
+            .signal-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+            .signal-type { font-weight: 700; font-size: 18px; }
+            .signal-price { font-size: 16px; color: #8B949E; }
+            .signal-reason { font-size: 13px; color: #8B949E; margin-top: 8px; padding: 8px; background: #161B22; border-radius: 8px; }
+            .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-weight: 700; font-size: 14px; }
+            .badge-buy { background: #2EA043; color: #fff; }
+            .badge-sell { background: #DA3633; color: #fff; }
+            .badge-hold { background: #262C36; color: #8B949E; }
+            
+            table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+            th, td { padding: 10px 12px; border-bottom: 1px solid #1C2128; text-align: right; }
+            th { color: #8B949E; font-size: 13px; font-weight: 600; }
+            .empty-state { color: #8B949E; text-align: center; padding: 30px; }
+            
+            .form-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-bottom: 12px; }
+            .form-row label { color: #8B949E; font-size: 14px; min-width: 120px; }
+            .form-row input { background: #0E1116; border: 1px solid #262C36; border-radius: 8px; padding: 8px 12px; color: #E6EDF3; flex: 1; min-width: 100px; }
+            .btn { padding: 8px 20px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+            .btn-primary { background: #FBBF24; color: #0E1116; }
+            .btn-primary:hover { opacity: 0.8; transform: scale(1.02); }
+            .btn-sm { padding: 4px 12px; font-size: 12px; background: #262C36; color: #E6EDF3; }
+            .footer { margin-top: 30px; text-align: center; color: #8B949E; font-size: 13px; border-top: 1px solid #262C36; padding-top: 20px; }
+            
+            @media (max-width: 600px) { .stats-grid { grid-template-columns: 1fr 1fr; } }
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <h1>🔍 Seek Bot <span style="color:#8B949E; font-size:18px; font-weight:normal;">داشبورد التداول</span></h1>
+        
+        <!-- بطاقة الإحصائيات -->
+        <div class="card">
+            <h3>📊 لوحة الإحصائيات</h3>
+            <div class="stats-grid" id="statsGrid">
+                <div class="stat-box"><div class="label">💰 الرصيد</div><div class="value gold" id="balance">--</div></div>
+                <div class="stat-box"><div class="label">📈 إجمالي الربح</div><div class="value" id="pnl">--</div></div>
+                <div class="stat-box"><div class="label">✅ صفقات رابحة</div><div class="value green" id="wins">--</div></div>
+                <div class="stat-box"><div class="label">❌ صفقات خاسرة</div><div class="value red" id="losses">--</div></div>
+                <div class="stat-box"><div class="label">🎯 نسبة النجاح</div><div class="value blue" id="winRate">--</div></div>
+                <div class="stat-box"><div class="label">📊 صفقات مفتوحة</div><div class="value" id="openPos" style="color:#FBBF24;">--</div></div>
+            </div>
+        </div>
+
+        <!-- رأس المال والمخاطرة -->
+        <div class="card">
+            <h3>🛡️ رأس المال والمخاطرة</h3>
+            <div class="form-row">
+                <label>رأس المال ($)</label>
+                <input type="number" id="capitalInput" value="10000" step="100">
+                <label>مخاطرة %</label>
+                <input type="number" id="riskInput" value="2.0" step="0.1">
+                <label>هدف الربح %</label>
+                <input type="number" id="tpInput" value="3.0" step="0.1">
+                <label>وقف الخسارة %</label>
+                <input type="number" id="slInput" value="1.5" step="0.1">
+                <button class="btn btn-primary" onclick="saveSettings()">💾 حفظ الإعدادات</button>
+            </div>
+        </div>
+
+        <!-- الإشارات الحية -->
+        <div class="card">
+            <h3>📈 الإشارات الحية</h3>
+            <div id="signalsContainer">
+                <div class="empty-state">⏳ جاري تحميل الإشارات...</div>
+            </div>
+        </div>
+
+        <!-- سجل الصفقات -->
+        <div class="card">
+            <h3>📋 سجل الصفقات (Paper Trading)</h3>
+            <div id="tradesContainer">
+                <div class="empty-state">⏳ جاري تحميل السجل...</div>
+            </div>
+        </div>
+
+        <div class="footer">
+            ⚡ Seek Bot v2.0 · جميع الصفقات وهمية (Paper Trading) · تحديث تلقائي كل 15 ثانية
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // 1. جلب الإحصائيات
+        // ============================================================
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/status');
+                const data = await res.json();
+                document.getElementById('balance').textContent = '$' + data.balance.toFixed(2);
+                const pnl = document.getElementById('pnl');
+                pnl.textContent = '$' + data.total_pnl.toFixed(2);
+                pnl.className = 'value ' + (data.total_pnl >= 0 ? 'green' : 'red');
+                document.getElementById('wins').textContent = data.wins || 0;
+                document.getElementById('losses').textContent = data.losses || 0;
+                document.getElementById('winRate').textContent = data.win_rate ? data.win_rate.toFixed(1) + '%' : '0%';
+                document.getElementById('openPos').textContent = data.open_positions || 0;
+            } catch(e) { console.error('Status error:', e); }
+        }
+
+        // ============================================================
+        // 2. جلب الإشارات وعرضها
+        // ============================================================
+        async function fetchSignals() {
+            try {
+                const res = await fetch('/signals/all');
+                const data = await res.json();
+                const container = document.getElementById('signalsContainer');
+                if (!data || Object.keys(data).length === 0) {
+                    container.innerHTML = '<div class="empty-state">لا توجد إشارات حالياً</div>';
+                    return;
+                }
+                let html = '';
+                for (const [symbol, signal] of Object.entries(data)) {
+                    const type = signal.type || 'HOLD';
+                    const isBuy = type === 'BUY';
+                    const isSell = type === 'SELL';
+                    const badgeClass = isBuy ? 'badge-buy' : (isSell ? 'badge-sell' : 'badge-hold');
+                    const confidence = signal.confidence ? (signal.confidence * 100).toFixed(0) : '0';
+                    const price = signal.entry || '--';
+                    const reason = signal.reason || 'لا يوجد سبب محدد';
+                    html += `
+                        <div class="signal-card">
+                            <div class="signal-header">
+                                <div>
+                                    <span class="badge ${badgeClass}">${type}</span>
+                                    <span style="font-weight:600; margin-right:10px;">${symbol}</span>
+                                    <span style="color:#8B949E; font-size:14px;">الثقة: ${confidence}%</span>
+                                </div>
+                                <div class="signal-price">💰 ${price}</div>
+                            </div>
+                            <div class="signal-reason">📝 ${reason}</div>
+                        </div>
+                    `;
+                }
+                container.innerHTML = html;
+            } catch(e) { 
+                console.error('Signals error:', e);
+                document.getElementById('signalsContainer').innerHTML = '<div class="empty-state">❌ خطأ في جلب الإشارات</div>';
+            }
+        }
+
+        // ============================================================
+        // 3. جلب سجل الصفقات
+        // ============================================================
+        async function fetchTrades() {
+            try {
+                const res = await fetch('/trades');
+                const data = await res.json();
+                const container = document.getElementById('tradesContainer');
+                const history = data.history || [];
+                if (history.length === 0) {
+                    container.innerHTML = '<div class="empty-state">📭 لا توجد صفقات بعد</div>';
+                    return;
+                }
+                let html = `
+                    <table>
+                        <thead>
+                            <tr><th>الزوج</th><th>الاتجاه</th><th>الدخول</th><th>TP</th><th>SL</th><th>الربح ($)</th><th>الحالة</th></tr>
+                        </thead>
+                        <tbody>
+                `;
+                history.slice(-10).reverse().forEach(t => {
+                    const profit = t.profit || 0;
+                    const profitClass = profit >= 0 ? 'green' : 'red';
+                    html += `
+                        <tr>
+                            <td><b>${t.symbol}</b></td>
+                            <td>${t.side}</td>
+                            <td>${t.entry}</td>
+                            <td>${t.tp || '--'}</td>
+                            <td>${t.sl || '--'}</td>
+                            <td class="${profitClass}">${profit.toFixed(2)}</td>
+                            <td>${t.status || 'CLOSED'}</td>
+                        </tr>
+                    `;
+                });
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } catch(e) { 
+                console.error('Trades error:', e);
+                document.getElementById('tradesContainer').innerHTML = '<div class="empty-state">❌ خطأ في جلب السجل</div>';
+            }
+        }
+
+        // ============================================================
+        // 4. حفظ الإعدادات
+        // ============================================================
+        async function saveSettings() {
+            const capital = document.getElementById('capitalInput').value;
+            const risk = document.getElementById('riskInput').value;
+            const tp = document.getElementById('tpInput').value;
+            const sl = document.getElementById('slInput').value;
+            try {
+                const res = await fetch('/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ capital, risk_percent: risk, tp_percent: tp, sl_percent: sl })
+                });
+                const data = await res.json();
+                alert('✅ تم حفظ الإعدادات بنجاح!');
+                console.log('Settings saved:', data);
+            } catch(e) {
+                alert('❌ فشل حفظ الإعدادات');
+                console.error(e);
+            }
+        }
+
+        // ============================================================
+        // 5. التحديث التلقائي
+        // ============================================================
+        function refreshAll() {
+            fetchStatus();
+            fetchSignals();
+            fetchTrades();
+        }
+
+        // تحديث أولي
+        refreshAll();
+        // تحديث كل 15 ثانية
+        setInterval(refreshAll, 15000);
+    </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(html)
+
+# ============================================================
+# 5. بدء التشغيل - المحدّث التلقائي
+# ============================================================
 @app.on_event("startup")
 def startup_signal_updater():
     try:
